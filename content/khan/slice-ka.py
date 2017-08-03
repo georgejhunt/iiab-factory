@@ -7,7 +7,7 @@ src_dir = "/library/ka-lite/content"
 kalite_dbase_dir = "/library/ka-lite/database"
 
 parser = argparse.ArgumentParser(description="Slice Bittorrent Kalite Videos. List topics, and sizes for paths listed in paths.list file. Ouput youtube ids with -v")
-parser.add_argument("-i","--path_list", help="the full, or relative, path to the ini file containing list of paths. Default path khan/")
+parser.add_argument("-p","--path_list", metavar="FILENAME", help="the full, or relative, path to the text file containing list of paths. Required to output youtube ID list/")
 parser.add_argument("-s", "--src", metavar="SRC_DIR", help="get video availability, and sizes from this directory -- default is /library/ka-lite/content")
 parser.add_argument("-l", "--lang", type=str, default='en', required=False, help="language to select (default en)")
 parser.add_argument("-v", "--video", help="Instead, output video id list",action="store_true")
@@ -35,7 +35,21 @@ if args.work:
 else:
    work_dir = kalite_content_dir
 
+if args.path_list:
+   list_file = args.path_list
+else:
+   list_file = ""
+if not os.path.isfile(list_file):
+   if not os.path.isfile(os.path.join(work_dir,list_file)):
+       if args.video:
+          print("Please provide a text file with khan paths (starting with 'khan/' to generate video list")
+          sys.exit(1)
+   else:
+      list_file = os.path.join(work_dir,list_file) 
+      
+
 video_files = os.listdir(kalite_content_dir)
+videos_total_size=0L
 
 my_sqlite_file = work_dir + "/content_khan_" + lang + ".sqlite"
 #print("opening ",my_sqlite_file)
@@ -46,6 +60,36 @@ def human_fmt(num):
             return "%3.1f%s" % (num, unit,)
         num /= 1024.0
     return "%.1f%s%s" % (num, 'Yi', suffix)
+
+def print_subtree(parent):
+   global c
+   sql = 'select * from tree where path like "%s"'%parent
+   c.execute(sql)
+   pathnames = c.fetchall()
+   for path in pathnames:
+      thisp = path[0]+'%'
+      sql = 'select path,sum(size_on_disk) from item where path like "%s" group by path like "%s"'%(thisp,thisp,)
+      #print(sql)
+      c.execute(sql)
+      result = c.fetchone()
+      print result[0],human_fmt(result[1])
+
+def print_videos(parent):
+   global c,videos_total_size
+   sql = 'select * from tree where path like "%s"'%parent
+   c.execute(sql)
+   pathnames = c.fetchall()
+   for path in pathnames:
+      thisp = path[0]+'%'
+      sql = 'select youtube_id,size_on_disk from item where path like "%s" '%(thisp,)
+      print(sql)
+      c.execute(sql)
+      result = c.fetchall()
+      for r in result:
+         if r[0] != None:
+            print r[0]
+            videos_total_size += r[1]
+   print("Total size:%s"%human_fmt(videos_total_size))
 
 if not os.path.isfile(my_sqlite_file):
 #if True:
@@ -103,15 +147,16 @@ c = conn.cursor()
 c.execute(sql)
 conn.commit()
 
-c.execute("select * from tree")
-pathnames = c.fetchall()
-for path in pathnames:
-   thisp = path[0]+'%'
-   sql = 'select path,sum(size_on_disk) from item where path like "%s" group by path like "%s"'%(thisp,thisp,)
-   #print(sql)
-   c.execute(sql)
-   result = c.fetchone()
-   print result[0],human_fmt(result[1])
+if list_file:
+   for line in  open(list_file,'r'):
+      # use the first string in the line
+      spec = line.split(' ')[0]
+      if not args.video:
+         print_subtree(spec)
+      else:
+         print_videos(spec)
+else:
+   print_subtree("khan/%")
 '''
 found = 0
 not_found = 0
