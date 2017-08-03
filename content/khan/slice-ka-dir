@@ -1,0 +1,225 @@
+#!/usr/bin/python
+# Scan KA Lite content, update video sizes in blank field in database
+
+import sys, shutil, os.path, argparse, sqlite3
+
+src_dir = "/library/ka-lite/content"
+dest_dir = "/library/ka-lite/content"
+kalite_dbase_dir = "/library/ka-lite/database"
+
+parser = argparse.ArgumentParser(description="Summarize or Slice Kalite Videos in a directory. List topics, and sizes for top part of Khan topic tree, or paths listed in \"path.list\" file. (or copy them)")
+parser.add_argument("-s", "--src", metavar="SRC_DIR", help="get video availability, and sizes from this directory -(default: current working directory")
+parser.add_argument("-d","--dest", metavar="DEST_DIR", help="copy videos --requires -p, overrides -v -(default: " + dest_dir + ")")
+parser.add_argument("-p","--path_list", metavar="FILENAME", help="the full, or relative, path to the text file containing list of paths. Required to output youtube ID list, or copy videos -(default: whole topic tree starting with \"khan/\"")
+parser.add_argument("-v", "--video", help="Instead, output video id list (repuires -p)",action="store_true")
+parser.add_argument("-w", "--work", metavar="WORK_DIR", help="copy the KA database here, and update private copy with current video sizes  -(default: SRC_DIR)")
+parser.add_argument("-l", "--lang", type=str, default='en', required=False, help="language to select -(default: en)")
+
+args = parser.parse_args()
+lang = args.lang.lower()
+
+kalite_dbase_dir = "/library/ka-lite/database/"
+sqlite_file = kalite_dbase_dir + "/content_khan_" + lang + ".sqlite"
+if not os.path.isfile(sqlite_file):
+    print "Database " + sqlite_file + " not found. Has ka-lite been installed on this machine?"
+    print "  Expecting to find khan database at /library/ka-lite/database/."
+    sys.exit(1)
+
+if args.src:
+   kalite_content_dir = args.src+'/'
+else:
+   kalite_content_dir = os.getcwd() + '/'
+if not os.path.exists(kalite_content_dir):
+   print("Directory %s not found. Expecting a directeory containing downloaded Videos."%kalite_content_dir)
+   sys.exit(1)
+
+os.system("mkdir -p %sunused"%kalite_content_dir)
+rename_dir = os.path.join(kalite_content_dir,"unused/")
+
+if args.work:
+   work_dir = args.work
+else:
+   work_dir = kalite_content_dir
+if not os.path.exists(work_dir):
+   print("Directory %s not found. Expecting a directeory to hold working copy of KA database."%work_dir)
+   sys.exit(1)
+
+
+if args.path_list:
+   list_file = args.path_list
+   if not os.path.isfile(list_file):
+      if list_file == '':
+         list_file = 'path.list'
+      work_spec = os.path.isfile(os.path.join(work_dir,list_file))
+      local_spec = "./%s"%list_file
+      list_found=False
+      if os.path.isfile(work_spec):
+         list_found = True
+         list_file = work_spec
+      elif os.path.isfile(local_spec):
+         list_found = True
+         list_file = local_spec
+      if not list_found:
+         print("Did not fint %s in local, or work directories"%list_file)
+         sys.exit(1)
+else:
+   list_file = ""
+
+if args.video or args.dest and list_file == '':
+   print("Copying videos, or making a list, requires specifying the subset with a -p option")
+   sys.exit(1)
+
+############ a few useful function definitions ################
+def human_fmt(num):
+    for unit in ['','K','M','G','T','P','E','Z']:
+        if abs(num) < 1024.0:
+            return "%3.1f%s" % (num, unit,)
+        num /= 1024.0
+    return "%.1f%s%s" % (num, 'Yi', suffix)
+
+def print_subtree(parent):
+   global c
+   sql = 'select * from tree where path like "%s"'%parent
+   c.execute(sql)
+   pathnames = c.fetchall()
+   for path in pathnames:
+      thisp = path[0]+'%'
+      sql = 'select path,sum(size_on_disk) from item where path like "%s" group by path like "%s"'%(thisp,thisp,)
+      #print(sql)
+      c.execute(sql)
+      result = c.fetchone()
+      print result[0],human_fmt(result[1])
+
+def print_videos(parent):
+   global c,videos_total_size
+   sql = 'select * from tree where path like "%s"'%parent
+   c.execute(sql)
+   pathnames = c.fetchall()
+   for path in pathnames:
+      thisp = path[0]+'%'
+      sql = 'select youtube_id,size_on_disk from item where path like "%s" '%(thisp,)
+      print(sql)
+      c.execute(sql)
+      result = c.fetchall()
+      for r in result:
+         if r[0] != None:
+            print r[0],r[1]
+            videos_total_size += r[1]
+   print("Total size:%s"%human_fmt(videos_total_size))
+
+def copy_subtree(parent):
+   global c,copy_total_size
+   sql = 'select * from tree where path like "%s"'%parent
+   c.execute(sql)
+   pathnames = c.fetchall()
+   for path in pathnames:
+      thisp = path[0]+'%'
+      sql = 'select youtube_id,size_on_disk from item where path like "%s" '%(thisp,)
+      print(sql)
+      c.execute(sql)
+      result = c.fetchall()
+      for r in result:
+         if r[0] != None:
+            print r[0],r[1]
+            videos_total_size += r[1]
+found = 0
+not_found = 0
+for f in video_files:
+    if ".mp4" in f:
+        v = f.split(".mp4")[0]
+        if v not in video_ids:
+            print str(v) + " not found"
+            not_found += 1
+            src = kalite_content_dir + f
+            dst = rename_dir + f
+            #print src, dst
+            os.rename(src, dst)
+            src = kalite_content_dir + v + ".png"
+            dst = rename_dir + v + ".png"
+            #print src, dst
+            os.rename(src, dst)
+
+
+##################   Begin processing  ######################
+video_files = os.listdir(kalite_content_dir)
+videos_total_size=0L
+copy_total_size=0L
+
+my_sqlite_file = work_dir + "/content_khan_" + lang + ".sqlite"
+
+#####  Only need to scan video directory, and update the database, once
+if not os.path.isfile(my_sqlite_file):
+#if True:
+   # update the stock databse with size of each downloaded/available file
+   conn = sqlite3.connect(my_sqlite_file)
+   c = conn.cursor()
+   shutil.copy(sqlite_file,my_sqlite_file)
+   os.system("sync")
+   conn = sqlite3.connect(my_sqlite_file)
+   c = conn.cursor()
+
+   size = 0
+   success=fail=missing=0
+   last_hash=""
+   for v in sorted(video_files):
+      hash = v.split('.')[0]
+      if hash != last_hash and size != 0:
+         # update the database with the sum of mp4 and png
+         c.execute('update item set size_on_disk = ? where youtube_id = ? ', (size,hash,))
+         if c.rowcount > 0:
+            success += 1
+            #print "successful update",size,hash
+         else:
+            fail += 1
+            print "failed to update",hash
+            src = kalite_content_dir + hash + '.mp4'
+            dst = rename_dir + hash + '.mp4'
+            #print src,dst
+            try:
+               os.rename(src,dst)
+               src = kalite_content_dir + hash + '.png'
+               dst = rename_dir + hash + '.png'
+               os.rename(src,dst)
+            except:
+               print "rename exception:%s"%hash
+               pass
+         size = 0
+      else:
+         try:
+            filepath = os.path.join(kalite_content_dir, v)
+            size += int(os.stat(filepath).st_size)
+         except:
+            pass
+         last_hash = hash
+      if success % 100 ==  0:
+         print("success:%s, fail:%sk "%(success,fail,))
+   conn.commit()
+
+   ##########  add a table to hold the top part of the Khan topic tree (controlled by limit)
+   sql = '''create table if not exists tree as with recursive chunk(path,pk) as (select path,parent_id from item where parent_id = 16991 union  select item.path,item.pk from item,chunk where item.parent_id = chunk.pk limit 100) select path from chunk;'''
+
+   c = conn.cursor()
+   c.execute(sql)
+   conn.commit()
+
+##########   Can now assume that the database is filled with video file sizes (size_on_disk)
+
+conn = sqlite3.connect(my_sqlite_file)
+c = conn.cursor()
+
+
+if list_file:
+   for line in  open(list_file,'r'):
+      # use the first string in the line -- our list output format includes size
+      parent = line.split(' ')[0]
+      if args.dest:
+         copy_subtree(parent)
+      elif args.video:
+         print_videos(parent)
+      else:
+         print_subtree(parent)
+else:
+   print_subtree("khan/%")
+
+conn.close()
+sys.exit(0)
