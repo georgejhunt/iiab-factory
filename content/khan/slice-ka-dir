@@ -37,7 +37,6 @@ if not os.path.exists(kalite_content_dir):
 os.system("mkdir -p %sunused"%kalite_content_dir)
 rename_dir = os.path.join(kalite_content_dir,"unused/")
 
-print args.dest
 if args.dest and args.dest != '':
    kalite_dest_dir = args.dest
 
@@ -63,7 +62,6 @@ if args.path_list:
          sys.exit(1)
 else:
    list_file = ""
-print "list_file:%s"%list_file
 if (args.video or args.dest) and list_file == '':
    print("Copying videos, or making a list, requires specifying the subset with a -p option")
    sys.exit(1)
@@ -76,35 +74,45 @@ def human_fmt(num):
         num /= 1024.0
     return "%.1f%s%s" % (num, 'Yi', suffix)
 
+def size_block(fname):
+   lSize=os.stat(fname).st_size
+   bSize=os.statvfs(fname).f_bsize
+   return lSize/bSize+1)*bSize
+
 def print_subtree(parent):
    global c,videos_total_size
-   sql = 'select * from tree where path like "%s"'%parent
+   parent = parent+'%'
+   # select all in this path, insert into unique hash list eliminating duplicates
+   sql = 'select path,youtube_id,size_on_disk from item where path like "%s"'%parent
    c.execute(sql)
    pathnames = c.fetchall()
    for path in pathnames:
-      thisp = path[0]+'%'
-      sql = 'select path,sum(size_on_disk) from item where path like "%s" group by path like "%s"'%(thisp,thisp,)
-      #print(sql)
+      sql = "insert or ignore into selected (youtube_id) values (path[1])"
       c.execute(sql)
-      result = c.fetchone()
-      print result[0],human_fmt(result[1])
-      videos_total_size += result[1]
+      if c.rowcount == 1:
+         size_blocks += path[2] 
+   # sum the file sizes on this path
+   sql = 'select path,youtube_id,sum(size_on_disk) from item where path like "%s"'%parent
+   c.execute(sql)
+   pathnames = c.fetchall()
+   for path in pathnames:
+      print path[0],human_fmt(path[1])
+      videos_total_size += path[1]
 
 def print_videos(parent):
    global c,videos_total_size
-   sql = 'select * from tree where path like "%s"'%parent
+   parent = parent+'%'
+   sql = "drop table if exists videos"
+   c.execute(sql)
+   sql = 'create table videos as select youtube_id,size_on_disk from item where path like "%s"'%parent
+   c.execute(sql)
+   sql = "select max(youtube_id),max(size_on_disk) from videos group by youtube_id"
    c.execute(sql)
    pathnames = c.fetchall()
    for path in pathnames:
-      thisp = path[0]+'%'
-      sql = 'select youtube_id,size_on_disk from item where path like "%s" '%(thisp,)
-      print(sql)
-      c.execute(sql)
-      result = c.fetchall()
-      for r in result:
-         if r[0] != None:
-            print r[0],r[1]
-            videos_total_size += r[1]
+      if path[0] != None:
+         print path[0],path[1]
+         videos_total_size += path[1]
 
 def copy_file(src, dest, force):
    #print 'copy', src, dest
@@ -120,21 +128,29 @@ def copy_file(src, dest, force):
 def copy_subtree(parent):
    global c,videos_total_size
    parent = parent+'%'
-   sql = 'select youtube_id,size_on_disk from item where path like "%s" '%(parent,)
-   print(sql)
+   sql = "drop table if exists copy"
    c.execute(sql)
-   result = c.fetchall()
-   for r in result:
-      if r[0] != None:
-         src = kalite_content_dir + r[0] + ".mp4"
-         dest = kalite_dest_dir + r[0] + ".mp4"
+   sql = 'create table copy as select youtube_id,size_on_disk from item where path like "%s"'%parent
+   c.execute(sql)
+   sql = "select distinct * from copy"
+   c.execute(sql)
+   pathnames = c.fetchall()
+   for path in pathnames:
+      if path[0] != None:
+         if path[1] == 0:
+            continue
+         src = kalite_content_dir + path[0] + ".mp4"
+         if not os.path.isfile(src):
+            print("lost:%s size %s"%src, path[1])
+            continue
+         dest = kalite_dest_dir + path[0] + ".mp4"
          copied = copy_file(src, dest, args.force)
          if not copied:
             continue
-         src = kalite_content_dir + r[0] + ".png"
-         dest = kalite_dest_dir+ r[0] + ".png"
+         src = kalite_content_dir + path[0] + ".png"
+         dest = kalite_dest_dir+ path[0] + ".png"
          copied = copy_file(src, dest, args.force)
-         videos_total_size += r[1]
+         videos_total_size += path[1]
 
 
 ##################   Begin processing  ######################
@@ -213,14 +229,20 @@ c = conn.cursor()
 
 
 if list_file:
+   print
+   print "# Name of file containing list of Topics(paths):%s"%list_file
+   sql = "drop table if exists selected"
+   c.execute(sql)
+   sql = "create table selected (youtube_id varchr unique, size_on_disk int, block_byte int)"
+   c.execute(sql)
    for line in  open(list_file,'r'):
       # use the first string in the line -- our list output format includes size
       # But if is starts with a #, skip it
-      if list_file[0] == '#':
+      if line == "" or list_file[0] == '#':
          continue
       parent = line.split(' ')[0]
       if args.dest:
-         print("Copying selected by %s to %s"%(kalite_content_dir,kalite_dest_dir,))
+         print("Copying selected by %s"%(parent,))
          copy_subtree(parent)
       elif args.video:
          print_videos(parent)
@@ -228,8 +250,21 @@ if list_file:
          print_subtree(parent)
    print
    print("# Total size:%s"%human_fmt(videos_total_size))
+   print
 else:
-   print_subtree("khan/%")
+   print
+   print "# Recursive list of topics, 3 levels deep"
+   sql = "drop table if exists selected"
+   c.execute(sql)
+   sql = 'select path from tree where path like "khan/"'
+   c.execute(sql)
+   pathnames = c.fetchall()
+   for path in pathnames:
+      parent = path[0]
+      print_subtree(parent)
+   print
+   print("# Total size:%s"%human_fmt(videos_total_size))
+   print
 
 conn.close()
 sys.exit(0)
