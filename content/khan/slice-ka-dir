@@ -77,27 +77,40 @@ def human_fmt(num):
 def size_block(fname):
    lSize=os.stat(fname).st_size
    bSize=os.statvfs(fname).f_bsize
-   return lSize/bSize+1)*bSize
+   return (lSize/bSize+1)*bSize
 
 def print_subtree(parent):
-   global c,videos_total_size
-   parent = parent+'%'
+   global c,videos_total_size,videos_disk_size
+   parent_like = parent+'%'
+   sql = 'drop table if exists with_duplicates'
+   c.execute(sql)
    # select all in this path, insert into unique hash list eliminating duplicates
-   sql = 'select path,youtube_id,size_on_disk from item where path like "%s"'%parent
+   sql = 'create table with_duplicates as select youtube_id,filename, filesize, size_on_disk from size_data where path like "%s"'%parent_like
    c.execute(sql)
-   pathnames = c.fetchall()
-   for path in pathnames:
-      sql = "insert or ignore into selected (youtube_id) values (path[1])"
-      c.execute(sql)
-      if c.rowcount == 1:
-         size_blocks += path[2] 
-   # sum the file sizes on this path
-   sql = 'select path,youtube_id,sum(size_on_disk) from item where path like "%s"'%parent
+   # add these files the the selected aggregation
+   c.execute("select * from with_duplicates")
+   rows = c.fetchall()
+   for row in rows:
+      sql = 'insert or ignore into selected (youtube_id,filename,filesize,size_on_disk) values (?,?,?,?)'
+      c.execute(sql,(row["youtube_id"],row["filename"],row["filesize"],row["size_on_disk"],))
+#   print(row["youtube_id"],row["filename"],row["filesize"],row["size_on_disk"],)
+   # delete duplicates
+   sql = 'delete from with_duplicates where rowid not in (select  min(rowid) from with_duplicates group by filename)'
    c.execute(sql)
-   pathnames = c.fetchall()
-   for path in pathnames:
-      print path[0],human_fmt(path[1])
-      videos_total_size += path[1]
+   sql = 'drop table if exists no_duplicates'
+   c.execute(sql)
+   sql = 'alter table with_duplicates rename to no_duplicates'
+   c.execute(sql)
+   sql = 'select sum(filesize), sum(size_on_disk) from no_duplicates group by youtube_id'
+   c.execute(sql)
+   sql = 'drop table if exists summary'
+   c.execute(sql)
+   sql = 'create table summary as select sum(filesize), sum(size_on_disk) from no_duplicates'
+   c.execute(sql)
+   c.execute('select * from summary')
+   result = c.fetchone()
+   conn.commit()
+   print('%s %s %s'%(parent,human_fmt(result[0]),human_fmt(result[1]),))
 
 def print_videos(parent):
    global c,videos_total_size
@@ -130,32 +143,29 @@ def copy_subtree(parent):
    parent = parent+'%'
    sql = "drop table if exists copy"
    c.execute(sql)
-   sql = 'create table copy as select youtube_id,size_on_disk from item where path like "%s"'%parent
+   sql = 'create table copy as select youtube_id from item where path like "%s"'%parent
    c.execute(sql)
    sql = "select distinct * from copy"
    c.execute(sql)
-   pathnames = c.fetchall()
-   for path in pathnames:
-      if path[0] != None:
-         if path[1] == 0:
-            continue
-         src = kalite_content_dir + path[0] + ".mp4"
-         if not os.path.isfile(src):
-            print("lost:%s size %s"%src, path[1])
-            continue
-         dest = kalite_dest_dir + path[0] + ".mp4"
-         copied = copy_file(src, dest, args.force)
-         if not copied:
-            continue
-         src = kalite_content_dir + path[0] + ".png"
-         dest = kalite_dest_dir+ path[0] + ".png"
-         copied = copy_file(src, dest, args.force)
-         videos_total_size += path[1]
+   ids = c.fetchall()
+   for id in ids:
+      src = kalite_content_dir + id[0] + ".mp4"
+      if not os.path.isfile(src):
+         print("lost:%s "%src)
+         continue
+      dest = kalite_dest_dir + id[0] + ".mp4"
+      copied = copy_file(src, dest, args.force)
+      if not copied:
+         continue
+      src = kalite_content_dir + id[0] + ".png"
+      dest = kalite_dest_dir+ id[0] + ".png"
+      copied = copy_file(src, dest, args.force)
 
 
 ##################   Begin processing  ######################
 video_files = os.listdir(kalite_content_dir)
 videos_total_size=0L
+videos_disk_size=0L
 copy_total_size=0L
 
 my_sqlite_file = work_dir + "/content_khan_" + lang + ".sqlite"
@@ -166,53 +176,52 @@ if not os.path.isfile(my_sqlite_file) or (args.force and not args.dest):
 #if True:
    # update the stock databse with size of each downloaded/available file
    print("Creating working copy of kalite databse and recording file sizes into it")
-   conn = sqlite3.connect(my_sqlite_file)
-   c = conn.cursor()
    shutil.copy(sqlite_file,my_sqlite_file)
    os.system("sync")
    conn = sqlite3.connect(my_sqlite_file)
+   # following line causes return of dictionary
+   conn.row_factory = sqlite3.Row
    c = conn.cursor()
+   sql = "create table size_data ( pk int, path varchar,filename varchar,filesize int,size_on_disk int,parent_id int,youtube_id varchar,path_overlap int);"
+   c.execute(sql)
 
    size = 0
-   success=fail=missing=0
+   success=fail=missing=1
    last_hash=""
-   for v in sorted(video_files):
+   for v in video_files:
       #print v
       stopper += 1
-      #if stopper > 5: sys.exit(1)
+      #if stopper > 5: 
+      #   conn.commit()
+      #   sys.exit(1)
       hash = v.split('.')[0]
-      if hash != last_hash and size != 0:
-         # update the database with the sum of mp4 and png
-         c.execute('update item set size_on_disk = ? where youtube_id = ? ', (size,last_hash,))
-         if c.rowcount > 0:
+      if True:
+         try:
+            filepath = os.path.join(kalite_content_dir, v)
+            size = int(os.stat(filepath).st_size)
+         except:
+            print "os.stat.error",filepath
+            continue
+         # find out how many paths are associated with this hash
+         sql = 'select count(*) as num,* from item where youtube_id = "%s"'%hash
+         #print sql
+         c.execute(sql)
+         rows = c.fetchall()
+         num = rows[0]['num']
+         if num > 0:
+            sql = 'select * from item where youtube_id = "%s"'%hash
+            c.execute(sql)
+            rows = c.fetchall()
             success += 1
-            #print "successful update. Hash:%s Size:%s"%(last_hash,size,)
-            if c.rowcount > 1:
-               print("ERROR! - updated %s records"%c.rowcount)
+            for row in rows:
+               c.execute("insert into size_data (pk,path,filename,filesize,size_on_disk,parent_id,youtube_id,path_overlap) values (?,?,?,?,?,?,?,?)",(row['pk'],row['path'],filepath,size,size_block(filepath),row['parent_id'],hash,num))
+            if c.rowcount < 1:
+               print("Error: failed to insert size_data")
          else:
             fail += 1
-            print "failed to update",hash,size
-            src = kalite_content_dir + hash + '.mp4'
-            dest = rename_dir + hash + '.mp4'
-            #print src,dest
-            try:
-               os.rename(src,dest)
-               src = kalite_content_dir + hash + '.png'
-               dest = rename_dir + hash + '.png'
-               os.rename(src,dest)
-            except:
-               print "rename exception:%s"%hash
-               pass
-         size = 0
-      try:
-         filepath = os.path.join(kalite_content_dir, v)
-         size += int(os.stat(filepath).st_size)
-         #print v,size
-      except:
-         pass
-      last_hash = hash
+            print "failed to find ",hash,size,size_block(filepath),v,filepath
       if success % 500 ==  0:
-         print("success:%s, fail:%sk "%(success,fail,))
+         print("success:%s, fail:%s "%(success,fail,))
    conn.commit()
 
    ##########  add a table to hold the top part of the Khan topic tree (controlled by limit)
@@ -222,19 +231,21 @@ if not os.path.isfile(my_sqlite_file) or (args.force and not args.dest):
    c.execute(sql)
    conn.commit()
 
-##########   Can now assume that the database is filled with video file sizes (size_on_disk)
+##########   Can now assume that the size_data tables is filled with video file sizes 
 
 conn = sqlite3.connect(my_sqlite_file)
+# following line causes return of dictionary
+conn.row_factory = sqlite3.Row
 c = conn.cursor()
-
+sql = "drop table if exists selected"
+c.execute(sql)
+sql = "create table selected (youtube_id varchr unique, filename varchar, filesize int,size_on_disk int)"
+c.execute(sql)
+conn.commit()
 
 if list_file:
    print
    print "# Name of file containing list of Topics(paths):%s"%list_file
-   sql = "drop table if exists selected"
-   c.execute(sql)
-   sql = "create table selected (youtube_id varchr unique, size_on_disk int, block_byte int)"
-   c.execute(sql)
    for line in  open(list_file,'r'):
       # use the first string in the line -- our list output format includes size
       # But if is starts with a #, skip it
@@ -248,23 +259,26 @@ if list_file:
          print_videos(parent)
       else:
          print_subtree(parent)
-   print
-   print("# Total size:%s"%human_fmt(videos_total_size))
-   print
 else:
    print
    print "# Recursive list of topics, 3 levels deep"
-   sql = "drop table if exists selected"
-   c.execute(sql)
-   sql = 'select path from tree where path like "khan/"'
+   sql = 'select path from tree where path like "khan/%"'
    c.execute(sql)
    pathnames = c.fetchall()
    for path in pathnames:
       parent = path[0]
       print_subtree(parent)
-   print
-   print("# Total size:%s"%human_fmt(videos_total_size))
-   print
 
+# eliminate duplicate file names
+sql = 'delete from selected where rowid not in (select  min(rowid) from selected group by filename)'
+c.execute(sql)
+sql = 'select  sum(filesize),sum(size_on_disk) from selected'
+c.execute(sql)
+result = c.fetchone()
+
+print("# Total size for files themselves:%s, including block size adder:%s"%(human_fmt(result[0]),human_fmt(result[1]),))
+print
+
+conn.commit()
 conn.close()
 sys.exit(0)
