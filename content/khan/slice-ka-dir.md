@@ -54,10 +54,10 @@ khan/math/early-math/ 147.81M
 khan/math/pre-algebra/ 542.86M
 
 ```
-4. Verify that the size of the selected files is as you expect by using the -p option to specify the name of the file containing the edited list of paths which you want to write to the ka-lite content directory.
+4. Verify that the size of the selected files is as you expect by using the -p option to specify the name of the file containing the edited list of paths.
 ```
 root@box:~# ./slice-ka-dir -s ~/kadownloads -p kalist
-# Name of file containing list of Topics(paths):spec
+# Name of file containing list of Topics(paths):kalist
 khan/math/algebra-basics/ 392.00M 392.82M
 khan/math/arithmetic/ 373.72M 374.70M
 khan/math/basic-geo/ 185.83M 186.21M
