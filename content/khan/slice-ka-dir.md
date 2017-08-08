@@ -1,3 +1,14 @@
+## Manipulate Ka-lite Videos
+#### Situation
+* Khan Accademy vidoes are posted on YouTube in a verbose format that does not fit on SD cards well.
+* There are resized videos available on bittorrent which conserve space.
+* The tool in Ka-lite for selecting videso does not know about the resized sizes, and fetches vides that are larger than they need to be.
+
+#### Slice-ka-dir program provides tools for selecting, and copying selected files, to a SD card.
+The following help is available at the commant line:
+```
+root@box:~/./slice-ka-dir -h
+
 usage: slice-ka-dir [-h] [-s SRC_DIR] [-d [DEST_DIR]] [-p FILENAME] [-v]
                     [-w WORK_DIR] [-l LANG] [-f]
 
@@ -26,3 +37,4 @@ optional arguments:
   -f, --force           If -d, copy even if target exists. If not -d (not a
                         copy), force regeneration of local database and file
                         sizes.
+```
