@@ -207,7 +207,7 @@ if list_file:
          continue
       parent = line.split(' ')[0]
       if args.dest:
-         print("Copying selected by %s"%(parent,))
+         print("Copying vides in path: %s"%(parent,))
          copy_subtree(parent)
       elif args.video:
          print_videos(parent)
@@ -228,7 +228,7 @@ sql = 'select sum(filesize),sum(size_on_disk) from size_data inner join selected
 c.execute(sql)
 row = c.fetchone()
 
-print("# Total file size discounting topic overlay:%s, including block size:%s"%(human_fmt(row[0]),human_fmt(row[1],)))
+print("# Total file size discounting topic overlap:%s, including block size:%s"%(human_fmt(row[0]),human_fmt(row[1],)))
 print
 
 conn.commit()
