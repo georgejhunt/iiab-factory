@@ -68,6 +68,8 @@ if (args.video or args.dest) and list_file == '':
 
 ############ a few useful function definitions ################
 def human_fmt(num):
+    if num == None:
+        return ""
     for unit in ['','K','M','G','T','P','E','Z']:
         if abs(num) < 1024.0:
             return "%4.2f%s" % (num, unit,)
@@ -82,50 +84,29 @@ def size_block(fname):
 def print_subtree(parent):
    global c,videos_total_size,videos_disk_size
    parent_like = parent+'%'
-   sql = 'drop table if exists with_duplicates'
+   sql = 'select item.path,sum(filesize),sum(size_data.size_on_disk) from item inner join size_data on item.youtube_id = size_data.youtube_id where item.path like "%s"'%parent_like
    c.execute(sql)
-   # select all in this path, insert into unique hash list eliminating duplicates
-   sql = 'create table with_duplicates as select youtube_id,filename, filesize, size_on_disk from size_data where path like "%s"'%parent_like
-   c.execute(sql)
-   # add these files the the selected aggregation
-   c.execute("select * from with_duplicates")
-   rows = c.fetchall()
-   for row in rows:
-      sql = 'insert or ignore into selected (youtube_id,filename,filesize,size_on_disk) values (?,?,?,?)'
-      c.execute(sql,(row["youtube_id"],row["filename"],row["filesize"],row["size_on_disk"],))
-#   print(row["youtube_id"],row["filename"],row["filesize"],row["size_on_disk"],)
-   # delete duplicates
-   sql = 'delete from with_duplicates where rowid not in (select  min(rowid) from with_duplicates group by filename)'
-   c.execute(sql)
-   sql = 'drop table if exists no_duplicates'
-   c.execute(sql)
-   sql = 'alter table with_duplicates rename to no_duplicates'
-   c.execute(sql)
-   sql = 'select sum(filesize), sum(size_on_disk) from no_duplicates group by youtube_id'
-   c.execute(sql)
-   sql = 'drop table if exists summary'
-   c.execute(sql)
-   sql = 'create table summary as select sum(filesize), sum(size_on_disk) from no_duplicates'
-   c.execute(sql)
-   c.execute('select * from summary')
    result = c.fetchone()
-   conn.commit()
-   print('%s %s %s'%(parent,human_fmt(result[0]),human_fmt(result[1]),))
+   print('%s %s %s'%(parent,human_fmt(result[1]),human_fmt(result[2]),))
+   videos_total_size += result[1]
+   videos_disk_size += result[2]
+   sql = 'select size_data.rowid from item inner join size_data on item.youtube_id = size_data.youtube_id where item.path like "%s"'%parent_like
+   c.execute(sql)
+   result = c.fetchall()
+   for r in result:
+      c.execute('insert or ignore into selected (id) values (?)',(r[0],))
 
 def print_videos(parent):
-   global c,videos_total_size
-   parent = parent+'%'
-   sql = "drop table if exists videos"
-   c.execute(sql)
-   sql = 'create table videos as select youtube_id,size_on_disk from item where path like "%s"'%parent
-   c.execute(sql)
-   sql = "select max(youtube_id),max(size_on_disk) from videos group by youtube_id"
+   global c,conn,videos_total_size
+   parent_like = parent+'%'
+   sql = 'select size_data.youtube_id,filesize,size_data.size_on_disk,filename,size_data.rowid from item inner join size_data on item.youtube_id = size_data.youtube_id where item.path like "%s"'%parent_like
    c.execute(sql)
    pathnames = c.fetchall()
    for path in pathnames:
-      if path[0] != None:
-         print path[0],path[1]
-         videos_total_size += path[1]
+      print os.path.basename(path[3]),path[1],path[2]
+      videos_total_size += path[1]
+      c.execute('insert or ignore into selected (id) values (?)',(path[4],))
+   conn.commit()
 
 def copy_file(src, dest, force):
    #print 'copy', src, dest
@@ -139,27 +120,16 @@ def copy_file(src, dest, force):
    return True
 
 def copy_subtree(parent):
-   global c,videos_total_size
-   parent = parent+'%'
-   sql = "drop table if exists copy"
+   global c,videos_total_size,videos_disk_size
+   parent_like = parent+'%'
+   sql = 'select item.path,filename,filesize,size_data.size_on_disk from item inner join size_data on item.youtube_id = size_data.youtube_id where item.path like "%s"'%parent_like
    c.execute(sql)
-   sql = 'create table copy as select youtube_id from item where path like "%s"'%parent
-   c.execute(sql)
-   sql = "select distinct * from copy"
-   c.execute(sql)
-   ids = c.fetchall()
-   for id in ids:
-      src = kalite_content_dir + id[0] + ".mp4"
-      if not os.path.isfile(src):
-         print("lost:%s "%src)
-         continue
-      dest = kalite_dest_dir + id[0] + ".mp4"
-      copied = copy_file(src, dest, args.force)
-      if not copied:
-         continue
-      src = kalite_content_dir + id[0] + ".png"
-      dest = kalite_dest_dir+ id[0] + ".png"
-      copied = copy_file(src, dest, args.force)
+   result = c.fetchall()
+   for r in result:
+      copied = copy_file(r[1], kalite_dest_dir, args.force)
+      if copied:
+         videos_total_size += r[2]
+         videos_disk_size += r[3]
 
 
 ##################   Begin processing  ######################
@@ -182,7 +152,7 @@ if not os.path.isfile(my_sqlite_file) or (args.force and not args.dest):
    # following line causes return of dictionary
    conn.row_factory = sqlite3.Row
    c = conn.cursor()
-   sql = "create table size_data ( pk int, path varchar,filename varchar,filesize int,size_on_disk int,parent_id int,youtube_id varchar,path_overlap int);"
+   sql = "create table size_data (indx integer primary key, path varchar,filename varchar,filesize int,size_on_disk int,parent_id int,youtube_id varchar,path_overlap int);"
    c.execute(sql)
 
    size = 0
@@ -195,31 +165,15 @@ if not os.path.isfile(my_sqlite_file) or (args.force and not args.dest):
       #   conn.commit()
       #   sys.exit(1)
       hash = v.split('.')[0]
-      if True:
-         try:
-            filepath = os.path.join(kalite_content_dir, v)
-            size = int(os.stat(filepath).st_size)
-         except:
-            print "os.stat.error",filepath
-            continue
-         # find out how many paths are associated with this hash
-         sql = 'select count(*) as num,* from item where youtube_id = "%s"'%hash
-         #print sql
-         c.execute(sql)
-         rows = c.fetchall()
-         num = rows[0]['num']
-         if num > 0:
-            sql = 'select * from item where youtube_id = "%s"'%hash
-            c.execute(sql)
-            rows = c.fetchall()
-            success += 1
-            for row in rows:
-               c.execute("insert into size_data (pk,path,filename,filesize,size_on_disk,parent_id,youtube_id,path_overlap) values (?,?,?,?,?,?,?,?)",(row['pk'],row['path'],filepath,size,size_block(filepath),row['parent_id'],hash,num))
-            if c.rowcount < 1:
-               print("Error: failed to insert size_data")
-         else:
-            fail += 1
-            print "failed to find ",hash,size,size_block(filepath),v,filepath
+      try:
+         filepath = os.path.join(kalite_content_dir, v)
+         size = int(os.stat(filepath).st_size)
+      except:
+         print "os.stat.error",filepath
+         continue
+      c.execute("insert into size_data (filename,filesize,size_on_disk,youtube_id) values (?,?,?,?)",(filepath,size,size_block(filepath),hash))
+      if c.rowcount < 1:
+         print("Error: failed to insert size_data")
       if success % 500 ==  0:
          print("success:%s, fail:%s "%(success,fail,))
    conn.commit()
@@ -239,7 +193,7 @@ conn.row_factory = sqlite3.Row
 c = conn.cursor()
 sql = "drop table if exists selected"
 c.execute(sql)
-sql = "create table selected (youtube_id varchr unique, filename varchar, filesize int,size_on_disk int)"
+sql = "create table selected (id int unique)" 
 c.execute(sql)
 conn.commit()
 
@@ -269,14 +223,12 @@ else:
       parent = path[0]
       print_subtree(parent)
 
-# eliminate duplicate file names
-sql = 'delete from selected where rowid not in (select  min(rowid) from selected group by filename)'
+# fetch the size of all files selected, discounting overlap of topic paths
+sql = 'select sum(filesize),sum(size_on_disk) from size_data inner join selected on size_data.indx = selected.id'
 c.execute(sql)
-sql = 'select  sum(filesize),sum(size_on_disk) from selected'
-c.execute(sql)
-result = c.fetchone()
+row = c.fetchone()
 
-print("# Total size for files themselves:%s, including block size adder:%s"%(human_fmt(result[0]),human_fmt(result[1]),))
+print("# Total file size discounting topic overlay:%s, including block size:%s"%(human_fmt(row[0]),human_fmt(row[1],)))
 print
 
 conn.commit()
