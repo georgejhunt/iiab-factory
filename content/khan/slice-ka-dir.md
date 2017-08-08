@@ -1,4 +1,4 @@
-## Manipulate Ka-lite Videos
+## Summarize and Slice Ka-lite Videos into subsets
 #### Situation
 * Khan Accademy vidoes are posted on YouTube in a verbose format that does not fit on SD cards well.
 * There are resized videos available on bittorrent which conserve space.
