@@ -1,6 +1,10 @@
 #!/bin/bash -x
 # this file is sourced to supply current context
 
-PRODUCT=iiab
-VERSION=6.4
+PRODUCT=pits
+VERSION=6.5
 PLATFORM=`cat /etc/*release|grep ^ID=|cut -f2 -d=`
+DESKTOP=https://downloads.raspberrypi.org/raspbian/images/raspbian-2017-09-08/2017-09-07-raspbian-stretch.zip
+OSVER=170907
+LITE=https://downloads.raspberrypi.org/raspbian_lite/images/raspbian_lite-2017-09-08/2017-09-07-raspbian-stretch-lite.zip
+CACHE_DIR=/image-cache
