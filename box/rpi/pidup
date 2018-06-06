@@ -1,0 +1,102 @@
+#!/bin/bash 
+# copy contents of IIAB to a second SD card in an USB adapter
+# notes to tce list gawk, bash, e2fsprogs, dialog, gparted
+
+
+export TEXTDOMAIN=piconf
+
+prefix=/usr/local
+exec_prefix=${prefix}
+bindir=${exec_prefix}/bin
+sbindir=${exec_prefix}/sbin
+version=0.1
+USE_NLS=no
+
+# i18n stuff
+if test "$USE_NLS" = "yes" && type -p gettext > /dev/null; then
+  xecho() {
+    gettext -s "$*"
+  }
+else
+  xecho() {
+    echo "$*"
+  }
+  gettext() {
+    echo -n "$*"
+  }
+fi
+xmsg() {
+  msg=$(gettext "$1")
+  shift
+  printf "$msg" $*
+}
+
+# Check for root privileges
+if [ `id -u` -ne 0 ]; then
+  xecho "You must be root to use this script."
+  exit 1
+fi
+
+usage() {
+    xecho "IIAB SD Card Duplicator"
+    echo "  version $version"
+    xecho "usage: pidup [options]
+  -d|--dest      Destination USB stick
+  -h|--help      what you're reading"
+}
+
+while (( $# )) ; do
+    case "$1" in
+    -h|--help)
+         usage; exit 0 ;;
+    -d|--dest)
+         DEST="$2"; shift 2;;
+    -L|--log)
+         LOGFILE="$2"; shift 2;;
+    *) usage ; exit 1 ;;
+    esac
+done
+
+# Check for dialog, whiptail, gdialog, awk, ... ?
+if type -p dialog > /dev/null; then
+    DIALOG=dialog
+else
+  if type -p whiptail > /dev/null; then
+    whiptail_wrapper() {
+      X1="$1"
+      X2="$2"
+      if [ $1 = --yesno ]; then
+        X3=`expr $3 + 2`
+      else
+        X3=$3
+      fi
+      shift 3
+      whiptail "$X1" "$X2" $X3 "$@"
+    }
+    DIALOG=whiptail_wrapper
+  else
+    xecho "Error, dialog or whiptail not found."
+    exit 1
+  fi
+fi
+if type -p awk > /dev/null; then :
+else
+  xecho "Error, awk not found. Can't continue."
+  exit 1
+fi
+
+
+SRC_SIZE=$(fdisk -l /dev/mmcblk0 | grep Disk | cut -d" " -f 5)
+echo $SRC_SIZE
+
+DEST_SIZE=$(fdisk -l /dev/sdb | grep Disk | cut -d" " -f 5)
+echo dest size: $DEST_SIZE
+
+BOOT_DEV=$(mount | grep boot | cut -d' ' -f1)
+echo boot_dev=$BOOT_DEV
+if [ ! -e "$DEST" ]; then  
+    title=$(gettext "Result")
+    msg=$(gettext "Destination not found")
+    $DIALOG --title "$title" --msgbox "$msg" 5 50
+    return 1
+fi
