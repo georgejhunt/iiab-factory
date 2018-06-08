@@ -114,6 +114,9 @@ erase_block=8192   # size in sectors
 SRC_SIZE=$(fdisk -l $SRC | grep Disk | cut -d" " -f 5)
 echo $SRC_SIZE
 
+MIN_SIZE=`resize2fs -M -P $SRC`
+echo minimum source size is $MIN_SIZE
+
 # if the destination is much larter than source, let user select the smaller size
 SIZE_DIFF=$(expr $DEST_SIZE - $SRC_SIZE)
 echo size_diff $SIZE_DIFF
@@ -223,16 +226,8 @@ mke2fs -t ext2 -L IIAB "${DEVICE}2"
 
 # figure out how many erase_blocks to write
 WRITE_COUNT=$( expr $END_P2 / $erase_block )
-#WRITE_COUNT=${WRITE_COUNT:2:}
 
-dd if=$SRC of=$DEVICE bs=4M count=${WRITE_COUNT} &
+(dd status=progress if="$SRC" of="$DEVICE") 2>&1 | \
+   stdbuf -o0 awk -v RS='\r' "/copied/ { printf(\"%0.f\n\", \$1 / $dsize * 100) }" | \
+   whiptail --title "Image writing" --gauge "Burning the image on the SD card..." 20 78 0
 
-while (true);do
-  sleep 5
-  copied=`pkill -usr1 dd | awk '{print $1}'`
-  if [ -z "$copied" ]; then
-     break
-  fi
-  percent=$(exper 100 * $copied / $dsize)
-  echo \r$percent
-done 
