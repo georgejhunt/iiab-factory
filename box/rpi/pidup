@@ -227,7 +227,21 @@ mke2fs -t ext2 -L IIAB "${DEVICE}2"
 # figure out how many erase_blocks to write
 WRITE_COUNT=$( expr $END_P2 / $erase_block )
 
-(dd status=progress if="$SRC" of="$DEVICE") 2>&1 | \
-   stdbuf -o0 awk -v RS='\r' "/copied/ { printf(\"%0.f\n\", \$1 / $dsize * 100) }" | \
-   whiptail --title "Image writing" --gauge "Burning the image on the SD card..." 20 78 0
+dd status=progress if="$SRC" of="$DEVICE" 2>progress &
 
+# now read the progress file and update the gauge
+lastcopied=
+# debug messages upset guage
+set +x
+while true; do
+   sleep 5
+   copied=`cat progress | tr '\r' '\n' | tail -n1 | awk '{print $1}'`
+   if [ "$copied" = "$lastcopied" ]; then break; fi
+   lastcopied=$copied
+   percent=$(expr $copied \* 100 / $dsize) 
+   line=`cat progress | tr '\r' '\n' | tail -n1 `
+   echo XXX
+   echo $percent
+   echo $line
+   echo XXX 
+done | whiptail --title "Image writing" --gauge "Burning the image on the SD card..." 10 78 0
