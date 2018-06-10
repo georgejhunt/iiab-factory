@@ -26,7 +26,7 @@ min_device_size(){
    root_start=${PART_START_SECTOR:0:-1}
 
    umount $PARTITION
-   e2fsck  $PARTITION
+   e2fsck -fy $PARTITION > /dev/null
    block4k=`resize2fs -M -P $PARTITION | cut -d" " -f7`
    echo $(expr $block4k \* 4096 + $root_start \* 512)
 }
@@ -38,29 +38,32 @@ truncate(){
    # returns 0 on success
 
    PARTITION=$1
-   DEVICE=${PARTITION:0:-1}
+   if [ ${PARTITION:0:11} = "/dev/mmcblk" ]; then
+      DEVICE=${PARTITION:0:12}
+   else
+      DEVICE=${PARTITION:0:-1}
+   fi
    PART_DIGIT=${PARTITION: (-1)}
 
-   PART_START_SECTOR=`parted -sm  $DEVICE unit s print|awk -v part="$PART_DIGIT" -F ":" '{if($1 == $part)print $2;}'`
-   root_start=${PART_START_SECTOR:0:-1}
+   PART_START_SECTOR=`parted -sm  $DEVICE unit s print|awk -v part="$PART_DIGIT" -F ":" '{if($1 == part)print $2;}'`
+   root_start=${PART_START_SECTOR:0: -1}
 
    # total prior sectors is 1 less than start of this one
    prior_sectors=$(( root_start - 1 ))
 
    # resize root file system
    umount $PARTITION
-   e2fsck -fy $PARTITION
-   if test ! $?; then exit 1; fi
+   e2fsck -fy $PARTITION > /dev/null
+   if test $? -ne 0; then exit 1; fi
    if [ $# -lt 2 ]; then
      block4k=`resize2fs -P $PARTITION | cut -d" " -f7`
    else
      block4k=$2
    fi
    resize2fs $PARTITION $block4k
-   if ! $?; then exit 1; fi
 
    umount $PARTITION
-   e2fsck -fy $PARTITION
+   e2fsck -fy $PARTITION > /dev/null
 
    # fetch the new size of ROOT PARTITION
    blocks4k=`e2fsck -n $PARTITION 2>/dev/null|grep blocks|cut -f5 -d" "|cut -d/ -f2`
@@ -68,12 +71,11 @@ truncate(){
    root_end=$(( (blocks4k * 8) + prior_sectors ))
 
    umount $PARTITION
-   e2fsck -fy $PARTITION
+   e2fsck -fy $PARTITION > /dev/null
 
    # resize root partition
    parted -s $DEVICE rm $PART_DIGIT
    parted -s $DEVICE unit s mkpart primary ext4 $root_start $root_end
-   if ! $?; then exit 1; fi
 
    umount $PARTITION
    exit 0

@@ -191,11 +191,14 @@ if [ $(expr "$CHOSEN_SIZE" \< "$SRC_SIZE") -eq 1 ] ; then
   human=$(bytesToHuman $CHOSEN_SIZE)
   msg=$(gettext "Proceed with resizing Source and Destination to $human?
 Both Source and Destination will be set to expand upon reboot")
-  $DIALOG --title "$title"  --yesno "$msg" 10 70 2
-  if  ! $? ; then exit 1;fi
+  $DIALOG --title "$title"  --yesno "$msg" 10 70 1
+  if $err -ne 0 ; then exit 1; fi
 
-  ret=$( truncate $SRC $CHOSEN_SIZE )
-  if  ! $? ; then exit 1;fi
+  title=$(gettext "The source SD card is begin resiged")
+  msg=$(gettext "This may take a few minutes, after which the copy progress screen will be displayed")
+  #DIALOG --title "$title" --msgbox "msg" 20 70 1
+  ret=$( truncate $SRC_PARTITION $CHOSEN_SIZE )
+  if $err -ne 0 ; then exit 1; fi
 
 fi
 
@@ -205,7 +208,7 @@ END_P2=$(( ($CHOSEN_SIZE / $sector ) ))
 dsize=$(( $END_P2 * $sector ))
 WRITE_COUNT=$( expr $END_P2 / $erase_block )
 
-dd status=progress if="$SRC" of="$DEVICE" bs=$erase_block 2>progress &
+dd status=progress if="$SRC" of="$DEVICE" bs=$erase_block count=$WRITE_COUNT 2>progress &
 
 # now read the progress file and update the gauge
 lastcopied=
