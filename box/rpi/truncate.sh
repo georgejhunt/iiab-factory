@@ -1,17 +1,47 @@
 #!/bin/bash
-source /etc/iiab/iiab.env
+# Functions useful to manipulate SD card content
+# All sizes in bytes, unless otherwise noted
+
+if [ -f /etc/iiab/iiab.env ]; then
+   source /etc/iiab/iiab.env
+else
+   PRODUCT=IIAB 
+   VERSION=6.5
+fi
+
+min_device_size(){
+   # Params:  in: last partition -- echos out: bytes
+
+   PARTITION=$1
+   PART_DIGIT=${PARTITION: (-1)}
+
+   # get the device associated with this partition
+   if [ ${PARTITION:0:11} = "/dev/mmcblk" ]; then
+      DEVICE=${PARTITION:0:12}
+   else
+      DEVICE=${PARTITION:0:-1}
+   fi
+
+   PART_START_SECTOR=`parted -sm  $DEVICE unit s print|awk -F':' -v part=$PART_DIGIT  '{if($1 == part)print $2;}'`
+   root_start=${PART_START_SECTOR:0:-1}
+
+   umount $PARTITION
+   e2fsck  $PARTITION
+   block4k=`resize2fs -M -P $PARTITION | cut -d" " -f7`
+   echo $(expr $block4k \* 4096 + $root_start \* 512)
+}
 
 truncate(){
    # truncate partition
    # param1: partition (example /dev/sdb2)
-   # param2: desired size in sectors (smallest possible if not specified)
+   # param2: desired size in 4kblocks (smallest possible if not specified)
    # returns 0 on success
-   PARTITION=$1
 
+   PARTITION=$1
    DEVICE=${PARTITION:0:-1}
    PART_DIGIT=${PARTITION: (-1)}
 
-   PART_START_SECTOR=`parted -sm  $DEVICE unit s print|cut -d: -f1,2|grep $PART_DIGIT:|cut -d: -f2`
+   PART_START_SECTOR=`parted -sm  $DEVICE unit s print|awk -v part="$PART_DIGIT" -F ":" '{if($1 == $part)print $2;}'`
    root_start=${PART_START_SECTOR:0:-1}
 
    # total prior sectors is 1 less than start of this one
@@ -20,14 +50,14 @@ truncate(){
    # resize root file system
    umount $PARTITION
    e2fsck -fy $PARTITION
+   if test ! $?; then exit 1; fi
    if [ $# -lt 2 ]; then
-     minsize=`resize2fs -P $PARTITION | cut -d" " -f7`
+     block4k=`resize2fs -P $PARTITION | cut -d" " -f7`
    else
-     minsize=$(expr $2 / 8)
+     block4k=$2
    fi
-   block4k=$(( minsize + 100000 )) # add 400MB OS claims 5% by default
    resize2fs $PARTITION $block4k
-   if ! $? then; exit 1; fi
+   if ! $?; then exit 1; fi
 
    umount $PARTITION
    e2fsck -fy $PARTITION
@@ -40,12 +70,10 @@ truncate(){
    umount $PARTITION
    e2fsck -fy $PARTITION
 
-   umount $PARTITION
-
    # resize root partition
    parted -s $DEVICE rm $PART_DIGIT
    parted -s $DEVICE unit s mkpart primary ext4 $root_start $root_end
-   if ! $? then; exit 1; fi
+   if ! $?; then exit 1; fi
 
    umount $PARTITION
    exit 0
@@ -53,6 +81,8 @@ truncate(){
 iiab_label(){
    if [ $# -ne 3 ];then
       echo "requires parameters partition, username, labelstring"
+      exit 1
+   fi
    PARTITION=$1
    USER=$2
    LABEL=$3
@@ -68,7 +98,7 @@ iiab_label(){
    pushd /tmp/sdcard/opt/iiab/iiab
    HASH=`git log --pretty=format:'g%h' -n 1`
    YMD=$(date +%y%m%d)
-   FILENAME=$(printf "%s-%s-%s-%s-%s.img" $PRODUCT $VERSION $YMD $1 $HASH)
+   FILENAME=$(printf "%s-%s-%s-%s-%s-%s.cpy" $PRODUCT $VERSION $USER $LABEL $YMD $HASH)
    echo $FILENAME > /tmp/sdcard/.iiab-image
    git branch >> /tmp/sdcard/.iiab-image
    git log -n 5 >> /tmp/sdcard/.iiab-image
@@ -78,6 +108,7 @@ iiab_label(){
    echo $HASH > ../../last-hash
    popd
 }
+
 auto_expand(){
    # receives partition as $1, assumes IIAB is loaded on that partition
    PARTITION=$1
@@ -86,4 +117,14 @@ auto_expand(){
 
    touch /tmp/sdcard/.resize-rootfs
    umount /tmp/sdcard
+}
+
+bytesToHuman() {
+    b=${1:-0}; d=''; s=0; S=(Bytes {K,M,G,T,E,P,Y,Z}B)
+    while ((b > 1024)); do
+        d="$(printf ".%02d" $((b % 1024 * 100 / 1024)))"
+        b=$((b / 1024))
+        let s++
+    done
+    echo "$b$d ${S[$s]}"
 }

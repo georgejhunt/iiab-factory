@@ -2,16 +2,22 @@
 # fast copy (using dd) IIAB to a second SD card in an USB adapter
 # tiny core notes: gawk, bash, e2fsprogs, dialog, gparted
 
+# Bring in useful functions
+source truncate.sh
+
 #############   Set up variables ############
+#  All size variables kept in bytes
 export TEXTDOMAIN=piconf
 
 prefix=/usr/local
 exec_prefix=${prefix}
 bindir=${exec_prefix}/bin
 sbindir=${exec_prefix}/sbin
-PARTITION=/dev/sdb1
+# declare default destination partition
+PARTITION=/dev/sdb2
 SRC=/dev/mmcblk0
-version=0.1
+SRC_PARTITION=/dev/mmcblk0p2
+DUPVERSION=0.1
 USE_NLS=no
 
 # i18n stuff
@@ -111,23 +117,25 @@ DEST_SIZE=$(fdisk -l $DEVICE | grep Disk | cut -d" " -f 5)
 echo dest size: $DEST_SIZE
 
 erase_block=8192   # size in sectors
-SRC_SIZE=$(fdisk -l $SRC | grep Disk | cut -d" " -f 5)
+SRC_SIZE=$(fdisk -l $SRC_PARTITION | grep Disk | cut -d" " -f 5)
 echo $SRC_SIZE
 
-MIN_SIZE=`resize2fs -M -P $SRC`
+MIN_SIZE=$( min_device_size "$SRC_PARTITION" )  # keep it all in bytes
 echo minimum source size is $MIN_SIZE
 
 # if the destination is much larter than source, let user select the smaller size
 SIZE_DIFF=$(expr $DEST_SIZE - $SRC_SIZE)
-echo size_diff $SIZE_DIFF
+#echo size_diff $SIZE_DIFF
 CHOSEN_SIZE=$DEST_SIZE
-if ! $(expr $SIZE_DIFF \> 8000000000); then
-   MENU_TITLE=$(gettext "Choose SD Size")
-   FUN=$(whiptail --title "Choose the size of the output SD card" --backtitle "Choose SD size" --menu "Choose SD Size" 17 80 4  --cancel-button Finish --ok-button Select \
+#   reminder expr returns 1 if true
+if [ $(expr $SIZE_DIFF \> 8000000000) -eq 1 ]; then
+   MENU_TITLE=$(gettext "Data on Source Sd card occupies $(bytesToHuman "$MIN_SIZE")")
+   FUN=$(whiptail --title "Choose the size of the output SD card" --backtitle "Choose SD size" --menu "Choose SD Size" 17 80 5  --cancel-button Finish --ok-button Select \
            "1 128 GB SD card" "Will verify that space exists" \
            "2 64 GB SD card" "" \
            "3 32 GB SD card" "" \
            "4 16 GB SD card" "" \
+           "5 Smallest possible" "Written to available SD" \
            3>&1 1>&2 2>&3)
 
        RET=$?
@@ -137,27 +145,36 @@ if ! $(expr $SIZE_DIFF \> 8000000000); then
              2\ *) CHOSEN_SIZE=$sd64GB ;;
              3\ *) CHOSEN_SIZE=$sd32GB ;;
              4\ *) CHOSEN_SIZE=$sd16GB ;;
+             5\ *) CHOSEN_SIZE=$MIN_SIZE ;;
            esac
        fi
-       if [ $(expr $CHOSEN_SIZE \< $SRC_SIZE) -eq 1 ]; then
-            CHOSEN_SIZE=$SRC_SIZE
+       # Can't choose a size where the data will not fit
+       if [ $(expr $CHOSEN_SIZE \< $MIN_SIZE) -eq 1 ]; then
+            CHOSEN_SIZE=$MIN_SIZE
        fi
 fi
 
+# check source and destination exist
+if [ ! -e "$DEST" ] || [ ! -e $SRC ]; then  
+    title=$(gettext "Result")
+    msg=$(gettext "Source $SRC or Destination $DEST not found")
+    whiptail --title "$title"  --msgbox "$msg" 20 60 1
+    exit 1
+fi
+
+# check source is not host tree for running linux OS
 BOOT_DEV=$(mount | grep boot | cut -d' ' -f1)
 BOOT_DEV=${BOOT_DEV:0:-1}
 #echo boot_dev=$BOOT_DEV
-
-# check source and destination exist
-if [ ! -e "$DEST" ] || [ ! -e $STC ]; then  
-    title=$(gettext "Result")
-    msg=$(gettext "Source $SRC or Destination $DEST not found")
+if [ "$BOOT_DEV" = "$SRC" ]; then
+    title=$(gettext "Error")
+    msg=$(gettext "Source cannot be the BOOT disk .. quitting")
     echo $msg
     whiptail --title "$title"  --msgbox "$msg" 20 60 1
     exit 1
 fi
 
-# check source is not opened as running linux OS
+# check destination is not host for running linux OS
 if [ "$BOOT_DEV" = "$DEST" ]; then
     title=$(gettext "Error")
     msg=$(gettext "Destination cannot be the BOOT disk .. quitting")
@@ -166,68 +183,29 @@ if [ "$BOOT_DEV" = "$DEST" ]; then
     exit 1
 fi
 
+#####################  resize the source?  ###########################
 # Check that a dd copy of source will fit on destination
-if [ $(expr "$DEST_SIZE" \< "$SRC_SIZE") -eq 1 ] ; then
-  title=$(gettext "Warning")
-  msg=$(gettext "Destination SD card ($DEST_SIZE) is smaller than source ($SRC_SIZE) ... Quitting")
-  $DIALOG --title "$title"  --msgbox "$msg" 10 60 1
-  # will eventually try to shrink the src -- for now just exit
-  exit 1
+echo Chhosen size:$CHOSEN_SIZE   Source size:$SRC_SIZE
+if [ $(expr "$CHOSEN_SIZE" \< "$SRC_SIZE") -eq 1 ] ; then
+  title=$(gettext "Truncation of Source is required. OK to proceed?")
+  human=$(bytesToHuman $CHOSEN_SIZE)
+  msg=$(gettext "Proceed with resizing Source and Destination to $human?
+Both Source and Destination will be set to expand upon reboot")
+  $DIALOG --title "$title"  --yesno "$msg" 10 70 2
+  if  ! $? ; then exit 1;fi
+
+  ret=$( truncate $SRC $CHOSEN_SIZE )
+  if  ! $? ; then exit 1;fi
+
 fi
 
-############     Partition the output device ###############
-START_P1=$erase_block
-END_P1=$(( $START_P1 + $P1_SIZE * $mbyte ))
-
-START_P2=$(( ($END_P1 / $erase_block + 1) * $erase_block ))
-END_P2=$(( ($CHOSEN_SIZE / $sector ) ))
-echo
-echo $START_P1   $END_P1
-echo $START_P2   $END_P2
-dsize=$(($END_P2 * $sector))
-echo will format destination to "$dsize" bytes
-
-# last minute check
-if [ $(expr $dsize \< $SRC_SIZE) -eq 1 ]; then
-   echo "halt everything"
-   echo "trying to write $SRC_SIZE to device that will be $dsize"
-   exit 1
-fi
-
-comment_out(){
-# write the new partition table
-umount /media/usb*
-
-fdisk "$DEVICE" << EOF
-d
-d
-n
-p
-$START_P1
-$END_P1
-n
-p
-$START_P2
-$END_P2
-t
-1
-c
-t
-2
-83
-w
-EOF
-
-partprobe $DEVICE
-mkdosfs -n boot "${DEVICE}1"
-mke2fs -t ext2 -L IIAB "${DEVICE}2"
-
-}
-
+####################### copy the data #################################
 # figure out how many erase_blocks to write
+END_P2=$(( ($CHOSEN_SIZE / $sector ) ))
+dsize=$(( $END_P2 * $sector ))
 WRITE_COUNT=$( expr $END_P2 / $erase_block )
 
-dd status=progress if="$SRC" of="$DEVICE" 2>progress &
+dd status=progress if="$SRC" of="$DEVICE" bs=$erase_block 2>progress &
 
 # now read the progress file and update the gauge
 lastcopied=
