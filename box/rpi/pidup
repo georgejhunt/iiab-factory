@@ -204,9 +204,8 @@ fi
 
 ####################### copy the data #################################
 # figure out how many erase_blocks to write
-END_P2=$(( ($CHOSEN_SIZE / $sector ) ))
-dsize=$(( $END_P2 * $sector ))
-WRITE_COUNT=$( expr $END_P2 / $erase_block )
+dsize=$CHOSEN_SIZE
+WRITE_COUNT=$( expr $CHOSEN_SIZE / $erase_block )
 
 dd status=progress if="$SRC" of="$DEVICE" bs=$erase_block count=$WRITE_COUNT 2>progress &
 
