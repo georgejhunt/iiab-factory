@@ -1,0 +1,255 @@
+#!/bin/bash 
+# fast copy (using dd) IIAB to an image, or a  second SD card
+# tiny core notes: gawk, bash, e2fsprogs, dialog, gparted
+
+# Bring in useful functions
+source truncate.sh
+
+#############   Set up variables ############
+#  All size variables kept in bytes
+export TEXTDOMAIN=piconf
+
+prefix=/usr/local
+exec_prefix=${prefix}
+bindir=${exec_prefix}/bin
+sbindir=${exec_prefix}/sbin
+SRC=/dev/mmcblk0
+SRC_PARTITION=/dev/mmcblk0p2
+DUPVERSION=0.1
+USE_NLS=no
+
+# i18n stuff
+if test "$USE_NLS" = "yes" && type -p gettext > /dev/null; then
+  xecho() {
+    gettext -s "$*"
+  }
+else
+  xecho() {
+    echo "$*"
+  }
+  gettext() {
+    echo -n "$*"
+  }
+fi
+xmsg() {
+  msg=$(gettext "$1")
+  shift
+  printf "$msg" $*
+}
+
+# Check for root privileges
+if [ `id -u` -ne 0 ]; then
+  xecho "You must be root to use this script."
+  exit 1
+fi
+
+#########   User interface command line stuff #########
+usage() {
+    xecho "IIAB SD Card Duplicator"
+    echo "  version $version"
+    xecho "usage: pidup [options]
+  -d|--dest      Destination USB stick
+  -h|--help      what you're reading"
+}
+
+while (( $# )) ; do
+    case "$1" in
+    -h|--help)
+         usage; exit 0 ;;
+    -d|--dest)
+         PARTITION="$2"; shift 2;;
+    -L|--log)
+         LOGFILE="$2"; shift 2;;
+    *) usage ; exit 1 ;;
+    esac
+done
+
+# Check for dialog, whiptail, gdialog, awk, ... ?
+if type -p whiptail > /dev/null; then
+    DIALOG=whiptail
+else
+  if type -p dialog > /dev/null; then
+    dialog_wrapper() {
+      X1="$1"
+      X2="$2"
+      if [ $1 = --yesno ]; then
+        X3=`expr $3 + 2`
+      else
+        X3=$3
+      fi
+      shift 3
+      dialog "$X1" "$X2" $X3 "$@"
+    }
+    DIALOG=dialog_wrapper
+  else
+    xecho "Error, dialog or whiptail not found."
+    exit 1
+  fi
+fi
+if type -p awk > /dev/null; then :
+else
+  xecho "Error, awk not found. Can't continue."
+  exit 1
+fi
+
+
+#########    Error check devices #########
+# first, what size output device is wanted?
+# Some definitions -- hopefully smaller than any purchased device
+sector=512
+mbyte=2048 #sectors/megabyte
+sd16GB=15900000000
+sd32GB=31900000000
+sd64GB="63900000000"
+sd128GB="12790000000"
+P1_SIZE=40
+
+device_list(){
+   while read line
+   do
+    awk 'BEGIN {print("   device            type        size      used       free     %       mounted to");}\
+              { printf("\"%-16s\"  \"%-5s %10s %10s %10s %6s    %-15s\"\n",$1,$2,$3,$4,$5,$6,$7);}'
+   done < devices
+}
+
+# mount all the partitions so that df can return usage
+for dev in `ls /mnt`; do
+  if ! grep $dev /etc/mtab; then
+     mount /dev/$dev /mnt/$dev
+  fi
+done
+
+echo > /tmp/devices
+df -hT | grep mnt | grep -v -e Disk -e sdb | sort >> /tmp/devices
+while read line
+do
+ awk 'BEGIN {print("   device            type        size      used       free     %       mounted to");}\
+           { printf("\"%-16s\"  \"%-5s %10s %10s %10s %6s    %-15s\"\n",$1,$2,$3,$4,$5,$6,$7);}'
+done < /tmp/devices > /tmp/devices1
+cat /tmp/devices1 
+
+   MENU_TITLE=$(gettext "Data on Source Sd card occupies $(bytesToHuman "$MIN_SIZE")")
+   FUN=$($DIALOG --title "Choose the size of the output SD card" --backtitle "Choose SD size" --menu "Choose SD Size" 17 80 5  --cancel-button Finish --ok-button Select \
+            $list 3>&1 1>&2 2>&3)
+
+exit 1
+
+# clip off the partition if provided
+DEVICE=${PARTITION:0:-1}
+if [ ! -e "$DEVICE" ]; then
+   DEVICE=$PARTITION
+fi
+DEST=$DEVICE
+
+DEST_SIZE=$(fdisk -l $DEVICE | grep Disk | cut -d" " -f 5)
+echo dest size: $DEST_SIZE
+
+erase_block=8192   # size in sectors
+SRC_SIZE=$(fdisk -l $SRC_PARTITION | grep Disk | cut -d" " -f 5)
+echo $SRC_SIZE
+
+MIN_SIZE=$( min_device_size "$SRC_PARTITION" )  # keep it all in bytes
+echo minimum source size is $MIN_SIZE
+
+# if the destination is much larter than source, let user select the smaller size
+SIZE_DIFF=$(expr $DEST_SIZE - $SRC_SIZE)
+#echo size_diff $SIZE_DIFF
+CHOSEN_SIZE=$DEST_SIZE
+#   reminder expr returns 1 if true
+if [ $(expr $SIZE_DIFF \> 8000000000) -eq 1 ]; then
+   MENU_TITLE=$(gettext "Data on Source Sd card occupies $(bytesToHuman "$MIN_SIZE")")
+   FUN=$(DIALOG --title "Choose the size of the output SD card" --backtitle "Choose SD size" --menu "Choose SD Size" 17 80 5  --cancel-button Finish --ok-button Select \
+           "1 128 GB SD card" "Will verify that space exists" \
+           "2 64 GB SD card" "" \
+           "3 32 GB SD card" "" \
+           "4 16 GB SD card" "" \
+           "5 Smallest possible" "Written to available SD" \
+           3>&1 1>&2 2>&3)
+
+       RET=$?
+       if [ $RET -eq 0 ]; then
+           case "$FUN" in
+             1\ *) CHOSEN_SIZE=$sd128GB ;;
+             2\ *) CHOSEN_SIZE=$sd64GB ;;
+             3\ *) CHOSEN_SIZE=$sd32GB ;;
+             4\ *) CHOSEN_SIZE=$sd16GB ;;
+             5\ *) CHOSEN_SIZE=$MIN_SIZE ;;
+           esac
+       fi
+       # Can't choose a size where the data will not fit
+       if [ $(expr $CHOSEN_SIZE \< $MIN_SIZE) -eq 1 ]; then
+            CHOSEN_SIZE=$MIN_SIZE
+       fi
+fi
+
+# check source and destination exist
+if [ ! -e "$DEST" ] || [ ! -e $SRC ]; then  
+    title=$(gettext "Result")
+    msg=$(gettext "Source $SRC or Destination $DEST not found")
+    DIALOG --title "$title"  --msgbox "$msg" 20 60 1
+    exit 1
+fi
+
+# check source is not host tree for running linux OS
+BOOT_DEV=$(mount | grep boot | cut -d' ' -f1)
+BOOT_DEV=${BOOT_DEV:0:-1}
+#echo boot_dev=$BOOT_DEV
+if [ "$BOOT_DEV" = "$SRC" ]; then
+    title=$(gettext "Error")
+    msg=$(gettext "Source cannot be the BOOT disk .. quitting")
+    echo $msg
+    DIALOG --title "$title"  --msgbox "$msg" 20 60 1
+    exit 1
+fi
+
+# check destination is not host for running linux OS
+if [ "$BOOT_DEV" = "$DEST" ]; then
+    title=$(gettext "Error")
+    msg=$(gettext "Destination cannot be the BOOT disk .. quitting")
+    echo $msg
+    DIALOG --title "$title"  --msgbox "$msg" 20 60 1
+    exit 1
+fi
+
+#####################  resize the source?  ###########################
+# Check that a dd copy of source will fit on destination
+echo Chhosen size:$CHOSEN_SIZE   Source size:$SRC_SIZE
+if [ $(expr "$CHOSEN_SIZE" \< "$SRC_SIZE") -eq 1 ] ; then
+  title=$(gettext "Truncation of Source is required. OK to proceed?")
+  human=$(bytesToHuman $CHOSEN_SIZE)
+  msg=$(gettext "Proceed with resizing Source and Destination to $human?
+Both Source and Destination will be set to expand upon reboot")
+  $DIALOG --title "$title"  --yesno "$msg" 10 70 1
+  if $err -ne 0 ; then exit 1; fi
+
+  title=$(gettext "The source SD card is begin resiged")
+  msg=$(gettext "This may take a few minutes, after which the copy progress screen will be displayed")
+  #DIALOG --title "$title" --msgbox "msg" 20 70 1
+  ret=$( truncate $SRC_PARTITION $CHOSEN_SIZE )
+  if $err -ne 0 ; then exit 1; fi
+
+fi
+
+####################### copy the data #################################
+# figure out how many erase_blocks to write
+dsize=$CHOSEN_SIZE
+WRITE_COUNT=$( expr $CHOSEN_SIZE / $erase_block )
+
+dd status=progress if="$SRC" of="$DEVICE" bs=$erase_block count=$WRITE_COUNT 2>progress &
+
+# now read the progress file and update the gauge
+lastcopied=
+# debug messages upset guage
+set +x
+while true; do
+   sleep 5
+   copied=`cat progress | tr '\r' '\n' | tail -n1 | awk '{print $1}'`
+   if [ "$copied" = "$lastcopied" ]; then break; fi
+   lastcopied=$copied
+   percent=$(expr $copied \* 100 / $dsize) 
+   line=`cat progress | tr '\r' '\n' | tail -n1 `
+   echo XXX
+   echo $percent
+   echo $line
+   echo XXX 
+done | DIALOG --title "Image writing" --gauge "Burning the image on the SD card..." 10 78 0
