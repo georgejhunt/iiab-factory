@@ -44,6 +44,7 @@ if [ `id -u` -ne 0 ]; then
 fi
 
 #########   User interface command line stuff #########
+export TERM=xterm
 usage() {
     xecho "IIAB SD Card Duplicator"
     echo "  version $version"
@@ -112,7 +113,7 @@ for dev in `ls /mnt`; do
   fi
 done
 
-####  Choose Source  ####
+################  Choose Source  ###################
 echo > /tmp/devices
 df -hT | grep mnt | grep -v -e Disk -e sdb | sort >> /tmp/devices
 
@@ -134,7 +135,9 @@ source /tmp/src
 if $? -ne 0 ; then exit 1; fi
 SRC=$(echo $SRC | awk '{print $1}')
 
+####  Get the minimun size that Destination must hold
 
+# but first warn user that getting minimun source size will take a while
 delay=$(gettext "Using e2fsck to check the minimum size of $SRC, This may take some time. . .")
 dialog --infobox "$delay" 7 60
 
@@ -142,7 +145,7 @@ MIN_SIZE=$( min_device_size "$SRC" )  # keep it all in bytes
 echo minimum source size is $MIN_SIZE
 MIN_SIZE_TEXT=$(gettext "Data on Source Sd card occupies $(bytesToHuman "$MIN_SIZE")")
 
-####  Choose Destination  ####
+################  Choose Destination  ###################
 ignore=${SRC:0:9}
 echo > /tmp/devices1
 df -hT | grep mnt | grep -v -e Disk -e sdb -e $ignore| sort >> /tmp/devices1
@@ -174,11 +177,19 @@ echo dest size: $DEST_SIZE
 erase_block=8192   # size in sectors
 SRC_SIZE=$(fdisk -l $SRC_PARTITION | grep Disk | cut -d" " -f 5)
 echo $SRC_SIZE
-
 # if the destination is much larger than source, let user select the smaller size
 SIZE_DIFF=$(expr $DEST_SIZE - $SRC_SIZE)
-#echo size_diff $SIZE_DIFF
-CHOSEN_SIZE=$DEST_SIZE
+echo size_diff $SIZE_DIFF
+
+QUESTION=$(gettext "Do you want to shrink the Source, even if it will fit without this step?")
+QUERY=$(gettext "Minimize Source?")
+dialog --title "$QUERY" --yesno "$QUESTION" 6 80
+if $? -eq 0; then
+  CHOSEN_SIZE=$MIN_SIZE
+else
+  CHOSEN_SIZE=$SRC_SIZE
+fi
+
 #   reminder expr returns 1 if true
 if [ $(expr $SIZE_DIFF \> 8000000000) -eq 1 ]; then
    MENU_TITLE=$(gettext "Data on Source Sd card occupies $(bytesToHuman "$MIN_SIZE")")
