@@ -143,9 +143,9 @@ echo minimum source size is $MIN_SIZE
 MIN_SIZE_TEXT=$(gettext "Data on Source Sd card occupies $(bytesToHuman "$MIN_SIZE")")
 
 ####  Choose Destination  ####
-echo > /tmp/devices
 ignore=${SRC:0:9}
-df -hT | grep mnt | grep -v -e Disk -e sdb -e $ignore| sort >> /tmp/devices
+echo > /tmp/devices1
+df -hT | grep mnt | grep -v -e Disk -e sdb -e $ignore| sort >> /tmp/devices1
 
 cat << EOF > /tmp/dest
    PAGE_TITLE=$(gettext "\"Choose Destination\"")
@@ -153,26 +153,20 @@ cat << EOF > /tmp/dest
    \$MIN_SIZE_TEXT  \n\n\n \\
    device            type        size      used       free     %       mounted to\n \\
 =================================================================================\"")
-   SRC=\$(dialog --title "\$PAGE_TITLE" --clear --ok-label "Select" --default-item "/dev/mmcblk0p2  " \\
+   DEST=\$(dialog --title "\$PAGE_TITLE" --clear --ok-label "Select" --default-item "/dev/mmcblk0p2  " \\
     --menu "\$MENU_TITLE" 20 90 25    \\
 EOF
 
 while read line
 do
  awk ' { printf("\"%-16s\"  \"%-5s %10s %10s %10s %6s    %-15s\"  \\\n",$1,$2,$3,$4,$5,$6,$7);}'
-done < /tmp/devices >> /tmp/dest
+done < /tmp/devices1 >> /tmp/dest
 echo  3\>\&1 1\>\&2 2\>\&3\) >> /tmp/dest
 source /tmp/dest
 if $? -ne 0 ; then exit 1; fi
 
-exit 1
-
-# clip off the partition if provided
-DEVICE=${PARTITION:0:-1}
-if [ ! -e "$DEVICE" ]; then
-   DEVICE=$PARTITION
-fi
-DEST=$DEVICE
+DEST=$(echo $DEST | awk '{print $1}')
+DEVICE=${DEST:0:-1}
 
 DEST_SIZE=$(fdisk -l $DEVICE | grep Disk | cut -d" " -f 5)
 echo dest size: $DEST_SIZE
@@ -216,7 +210,7 @@ fi
 if [ ! -e "$DEST" ] || [ ! -e $SRC ]; then  
     title=$(gettext "Result")
     msg=$(gettext "Source $SRC or Destination $DEST not found")
-    dialog --title "$title"  --msgbox "$msg" 20 60 1
+    dialog --title "$title"  --msgbox "$msg" 20 60
     exit 1
 fi
 
@@ -228,18 +222,12 @@ if [ "$BOOT_DEV" = "$SRC" ]; then
     title=$(gettext "Error")
     msg=$(gettext "Source cannot be the BOOT disk .. quitting")
     echo $msg
-    dialog --title "$title"  --msgbox "$msg" 20 60 1
+    dialog --title "$title"  --msgbox "$msg" 20 60 
     exit 1
 fi
 
-# check destination is not host for running linux OS
-if [ "$BOOT_DEV" = "$DEST" ]; then
-    title=$(gettext "Error")
-    msg=$(gettext "Destination cannot be the BOOT disk .. quitting")
-    echo $msg
-    dialog --title "$title"  --msgbox "$msg" 20 60 1
-    exit 1
-fi
+#####################  Confirm Choices     ###########################
+SRC_SPACE_AVAILABLE
 
 #####################  resize the source?  ###########################
 # Check that a dd copy of source will fit on destination
@@ -250,13 +238,13 @@ if [ $(expr "$CHOSEN_SIZE" \< "$SRC_SIZE") -eq 1 ] ; then
   msg=$(gettext "Proceed with resizing Source and Destination to $human?
 Both Source and Destination will be set to expand upon reboot")
   dialog --title "$title"  --yesno "$msg" 10 70 1
-  if $err -ne 0 ; then exit 1; fi
+  if $? -ne 0 ; then exit 1; fi
 
-  title=$(gettext "The source SD card is begin resiged")
+  title=$(gettext "The source SD card is beging resized")
   msg=$(gettext "This may take a few minutes, after which the copy progress screen will be displayed")
   #dialog --title "$title" --msgbox "msg" 20 70 1
   ret=$( truncate $SRC_PARTITION $CHOSEN_SIZE )
-  if $err -ne 0 ; then exit 1; fi
+  if $? -ne 0 ; then exit 1; fi
 
 fi
 
