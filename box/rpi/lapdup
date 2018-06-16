@@ -13,7 +13,7 @@ prefix=/usr/local
 exec_prefix=${prefix}
 bindir=${exec_prefix}/bin
 sbindir=${exec_prefix}/sbin
-SRC=/dev/mmcblk0
+SRC_DEVICE=/dev/mmcblk0
 SRC_PARTITION=/dev/mmcblk0p2
 DUPVERSION=0.1
 USE_NLS=no
@@ -132,17 +132,18 @@ do
 done < /tmp/devices >> /tmp/src
 echo  3\>\&1 1\>\&2 2\>\&3\) >> /tmp/src
 source /tmp/src
-if $? -ne 0 ; then exit 1; fi
-SRC=$(echo $SRC | awk '{print $1}')
+if test $? -ne 0 ; then exit 1; fi
+SRC_PARTITION=$(echo $SRC | awk '{print $1}')
+SRC_DEVICE=${SRC_PARTITION:0:(-2)}
 
 ####  Get the minimun size that Destination must hold
 
 # but first warn user that getting minimun source size will take a while
-delay=$(gettext "Using e2fsck to check the minimum size of $SRC, This may take some time. . .")
+delay=$(gettext "Using e2fsck to check the minimum size of $SRC_PARTITION, This may take some time. . .")
 dialog --infobox "$delay" 7 60
 
-MIN_SIZE=$( min_device_size "$SRC" )  # keep it all in bytes
-echo minimum source size is $MIN_SIZE
+#MIN_SIZE=$( min_device_size "$SRC_PARTITION" )  # keep it all in bytes
+#echo minimum source size is $MIN_SIZE
 MIN_SIZE_TEXT=$(gettext "Data on Source Sd card occupies $(bytesToHuman "$MIN_SIZE")")
 
 ################  Choose Destination  ###################
@@ -166,12 +167,21 @@ do
 done < /tmp/devices1 >> /tmp/dest
 echo  3\>\&1 1\>\&2 2\>\&3\) >> /tmp/dest
 source /tmp/dest
-if $? -ne 0 ; then exit 1; fi
-
-DEST=$(echo $DEST | awk '{print $1}')
-DEVICE=${DEST:0:-1}
-
-DEST_SIZE=$(fdisk -l $DEVICE | grep Disk | cut -d" " -f 5)
+if test $? -ne 0 ; then exit 1; fi
+DEST=$(echo "$DEST" | awk '{print $1;}')    # trim trailing spaces
+# currently, the decision on whether destination is a SD card is based upon "mmcblk"
+DEST_PARTITION=$(echo $DEST | awk '{print $1}')
+if test $(echo $DEST | grep mmcblk); then
+   DEST_DEVICE=${DEST_PARTITION:0:(-2)}
+   dest_is_sd=True
+else
+   dest_is_sd=False
+   DEST_DEVICE=${DEST_PARTITION:0:(-1)}
+   DEST_FREE=$(/usr/local/bin/df  | grep $DEST_PARTITION | awk '{print $4}')
+   DEST_FREE=$(expr $DEST_FREE \* 1024)
+fi
+   
+DEST_SIZE=$(fdisk -l $DEST_DEVICE | grep Disk | cut -d" " -f 5)
 echo dest size: $DEST_SIZE
 
 erase_block=8192   # size in sectors
@@ -184,7 +194,7 @@ echo size_diff $SIZE_DIFF
 QUESTION=$(gettext "Do you want to shrink the Source, even if it will fit without this step?")
 QUERY=$(gettext "Minimize Source?")
 dialog --title "$QUERY" --yesno "$QUESTION" 6 80
-if $? -eq 0; then
+if test $? -eq 0; then
   CHOSEN_SIZE=$MIN_SIZE
 else
   CHOSEN_SIZE=$SRC_SIZE
@@ -217,10 +227,40 @@ if [ $(expr $SIZE_DIFF \> 8000000000) -eq 1 ]; then
        fi
 fi
 
+################### Identify the copy  #####################
+# generate mount specifiers
+SRC_PARTITION_NIBBLE=${SRC_PARTITION:5}
+SRC_MNT=/mnt/$SRC_PARTITION_NIBBLE
+DEST_PARTITION_NIBBLE=${DEST:5}
+DEST_MNT=/mnt/$DEST_PARTITION_NIBBLE
+
+# Fetch username and copy identifier
+TITLE=$(gettext "Please identify this copy")
+MSG=$(gettext "Requires name and short identifying label")
+exec 3>&1
+DATA=$(dialog --output-separator ":" --title "$TITLE" --form "$MSG" 10 80 3 \
+      "Name:" 1 1 "" 1 7 15 0 \
+      "Label:" 2  1 "" 2 7 16 0 \
+      2>&1 1>&3)
+if test $? -ne 0 ; then exit 1; fi
+NAME=$(echo $DATA | awk -F: '{print $1;}')
+LABEL=$(echo $DATA | awk -F: '{print $2;}')
+# replace spaces with underscores
+NAME=$(echo $NAME | sed 's/ /_/g')
+LABEL=$(echo $LABEL | sed 's/ /_/g')
+iiab_label $SRC_PARTITION $NAME $LABEL
+TARGET=$DEST_MNT/$(cat /tmp/identifier_filename)
+echo $TARGET
+
 # check source and destination exist
-if [ ! -e "$DEST" ] || [ ! -e $SRC ]; then  
+if [ "$dest_is_sd" = "True" ]; then
+  write_to="$DEST_DEVICE"
+else
+  write_to="$DEST_PARTITION"
+fi
+if [ ! -e "$write_to" ] || [ ! -e "$SRC_DEVICE" ]; then  
     title=$(gettext "Result")
-    msg=$(gettext "Source $SRC or Destination $DEST not found")
+    msg=$(gettext "Source $SRC_DEVICE or Destination $write_to not found")
     dialog --title "$title"  --msgbox "$msg" 20 60
     exit 1
 fi
@@ -237,34 +277,64 @@ if [ "$BOOT_DEV" = "$SRC" ]; then
     exit 1
 fi
 
-#####################  Confirm Choices     ###########################
-SRC_SPACE_AVAILABLE
-
-#####################  resize the source?  ###########################
 # Check that a dd copy of source will fit on destination
-echo Chhosen size:$CHOSEN_SIZE   Source size:$SRC_SIZE
-if [ $(expr "$CHOSEN_SIZE" \< "$SRC_SIZE") -eq 1 ] ; then
-  title=$(gettext "Truncation of Source is required. OK to proceed?")
+if [ "$dest_is_sd" = "True" ]; then
+   output_size="$DEST_SIZE"
+else
+   output_size="$DEST_FREE"
+if [ $(expr "$CHOSEN_SIZE" \> "$output_size") -eq 1 ] ; then
+  msg=$(gettext "The source $SRC_PARTITION will not fit on the destination $DEST_PARTITION")
+  title=$(gettext "Fatal ERROR . . . Quitting")
+  dialog --title "$title"  --msgbox "$msg" 10 70 
+  exit 1
+elif [ $(expr "$CHOSEN_SIZE" \< "$output_size") -eq 1 ] ; then
+  echo Chosen size:$CHOSEN_SIZE   output size:$outpus_size
+  msg=$(gettext "Truncation of Source is required. \n \
+   Source bytes: $CHOSEN_SIZE.   Destination bytes: $DEST_SIZE \n \
+   OK to proceed?")
   human=$(bytesToHuman $CHOSEN_SIZE)
-  msg=$(gettext "Proceed with resizing Source and Destination to $human?
+  title=$(gettext "Proceed with resizing Source to $human? \
 Both Source and Destination will be set to expand upon reboot")
-  dialog --title "$title"  --yesno "$msg" 10 70 1
-  if $? -ne 0 ; then exit 1; fi
-
-  title=$(gettext "The source SD card is beging resized")
-  msg=$(gettext "This may take a few minutes, after which the copy progress screen will be displayed")
-  #dialog --title "$title" --msgbox "msg" 20 70 1
-  ret=$( truncate $SRC_PARTITION $CHOSEN_SIZE )
-  if $? -ne 0 ; then exit 1; fi
+  dialog --title "$title"  --yesno "$msg" 10 70 
+  if test $? -ne 0 ; then exit 1; fi
 
 fi
+#####################  Confirm Choices     ###########################
+if [ "$SRC_SIZE" = "$CHOSEN_SIZE" ]; then
+   SOURCE_TRUNCATE=NO
+else
+   SOURCE_TRUNCATE=YES
+fi
+
+if test "$dest_is_sd" = "True"; then
+   DEST_INFO=$(gettext "Destination device: $DEST_DEVICE")
+else
+   DEST_INFO=$(gettext "Destination specifier: "$TARGET"
+fi
+
+SRC_INFO=$(gettext "Source device: "$SRC_DEVICE") \
+Source will be truncated before copy: "$SOURCE_TRUNCATE" 
+TITLE=$(gettext Please Confirm the following COPY operation" )
+MSG="$SOURCE_INFO\n$DEST_INFO"
+dialog --Title "$TITLE" --yesno "$MSG" 7 70
+if test $? -ne 0; then exit 1; fi
+exit 1
+
+#####################  resize the source?  ###########################
+
+  title=$(gettext "Final Verification")
+  msg=$(gettext "Source: $SRC")
+  #dialog --title "$title" --msgbox "msg" 20 70 1
+  ret=$( truncate $SRC_PARTITION $CHOSEN_SIZE )
+  if test $? -ne 0 ; then exit 1; fi
+
 
 ####################### copy the data #################################
 # figure out how many erase_blocks to write
 dsize=$CHOSEN_SIZE
 WRITE_COUNT=$( expr $CHOSEN_SIZE / $erase_block )
 
-dd status=progress if="$SRC" of="$DEVICE" bs=$erase_block count=$WRITE_COUNT 2>progress &
+#dd status=progress if="$SRC" of="$DEVICE" bs=$erase_block count=$WRITE_COUNT 2>progress &
 
 # now read the progress file and update the gauge
 lastcopied=

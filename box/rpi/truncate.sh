@@ -89,7 +89,7 @@ iiab_label(){
    USER=$2
    LABEL=$3
    mkdir -p /tmp/sdcard
-   mount $PARTITION /tmp/sdcard
+   mount $PARTITION /tmp/sdcard > /dev/null
 
    if [ ! -d /tmp/sdcard/opt/iiab/iiab ]; then
      echo "Device is not IIAB root partition. Exiting."
@@ -100,7 +100,8 @@ iiab_label(){
    pushd /tmp/sdcard/opt/iiab/iiab
    HASH=`git log --pretty=format:'g%h' -n 1`
    YMD=$(date +%y%m%d)
-   FILENAME=$(printf "%s-%s-%s-%s-%s-%s.cpy" $PRODUCT $VERSION $USER $LABEL $YMD $HASH)
+   FILENAME=$(printf "%s-%s-%s-%s-%s-%s.img" $PRODUCT $VERSION $USER $LABEL $YMD $HASH)
+   echo $FILENAME > /tmp/identifier_filename
    echo $FILENAME > /tmp/sdcard/.iiab-image
    git branch >> /tmp/sdcard/.iiab-image
    git log -n 5 >> /tmp/sdcard/.iiab-image
@@ -109,6 +110,8 @@ iiab_label(){
    echo $FILENAME > ../../last-filename
    echo $HASH > ../../last-hash
    popd
+   umount /tmp/sdcard
+   rmdir /tmp/sdcard
 }
 
 auto_expand(){
