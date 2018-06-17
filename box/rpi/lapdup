@@ -249,6 +249,7 @@ existCheck(){
        exit 1
    fi
 }
+
 # check source is not host tree for running linux OS
 verifySourceNotBoot(){
    BOOT_DEV=$(mount | grep boot | cut -d' ' -f1)
@@ -262,8 +263,14 @@ verifySourceNotBoot(){
        exit 1
    fi
 }
+
+# Check that a dd copy of source will fit on destination
+willFit?{}{
+   if [ "$dest_is_sd" = "True" ]; then
+      output_size="$DEST_SIZE"
    else
       output_size="$DEST_FREE"
+   fi
    if [ $(expr "$CHOSEN_SIZE" \> "$output_size") -eq 1 ] ; then
      msg=$(gettext "The source $SRC_PARTITION will not fit on the destination $DEST_PARTITION")
      title=$(gettext "Fatal ERROR . . . Quitting")
@@ -337,14 +344,26 @@ ddCopy(){
       echo XXX 
    done | dialog --title "Image writing" --gauge "Burning the image on the SD card..." 10 78 0
 }
+cleanup(){
+   umount /mnt/SRC_DEVICE
+   if [ "$dest_is_sd" = "True" ]; then
+      umount $TARGET
+   fi
+}
+
 main(){
-  initialize "$@"
-  checkSudo "$@"
-  selectSource
-  verifySoureNotBoot
-  selectDestination
-  finalVerification
-  ddCopy
+   initialize "$@"
+   checkSudo "$@"
+   selectSource
+   verifySoureNotBoot
+   selectDestination
+   if [  "$dest_is_sd" != "True" ]; then
+    createFilename
+   fi
+   selecTruncate
+   willFit?
+   finalVerification
+   ddCopy
 }
 
 trap cleanup EXIT INT TERM
