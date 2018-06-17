@@ -266,7 +266,7 @@ verifySourceNotBoot(){
 }
 
 # Check that a dd copy of source will fit on destination
-willFit?(){
+willItFit(){
    if [ "$dest_is_sd" = "True" ]; then
       output_size="$DEST_SIZE"
    else
@@ -304,7 +304,7 @@ optionalTruncation(){
       DEST_INFO=$(gettext "Destination filename: $TARGET")
    fi
 
-   SRC_INFO=$(gettext "Source device: "$SRC_DEVICE \
+   SRC_INFO=$(gettext "Source device: $SRC_DEVICE \
    Source will be truncated before copy: $SOURCE_TRUNCATE" )
    TITLE=$(gettext "Please Confirm the following COPY operation" )
    MSG="$SOURCE_INFO\n$DEST_INFO"
@@ -366,7 +366,7 @@ main(){
     createFilename
    fi
    selecTruncate
-   willFit?
+   willItFit
    finalVerification
 #   ddCopy
 }
