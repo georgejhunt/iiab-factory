@@ -1,6 +1,9 @@
 #!/bin/bash -x
 # fast copy (using dd) IIAB to an image, or a  second SD card
 
+# Author: george hunt <georgejhunt.gmail.com> https://github.com/georgejhunt/iiab-factory
+# Ideas and structure attribution:   jules randolph <jules.sam.randolph@gmail.com> https://github.com/jsamr/bootiso
+
 # Bring in useful functions
 source truncate.sh
 
@@ -38,7 +41,7 @@ fi
 usage() {
     xecho "IIAB SD Card Duplicator"
     echo "  version $version"
-    xecho "usage: pidup [options]
+    xecho "usage: $0 [options]
   -d|--dest      Destination USB stick
   -h|--help      what you're reading"
 }
@@ -109,6 +112,9 @@ EOF
    SRC_PARTITION=$(echo $SRC | awk '{print $1}')
    SRC_DEVICE=${SRC_PARTITION:0:(-2)}
    echo $SRC
+   SRC_SIZE=$(fdisk -l $SRC_PARTITION | grep Disk | cut -d" " -f 5)
+   CHOSEN_SIZE=$SRC_SIZE
+   echo $SRC_SIZE
 }
 
 ####  Get the minimun size that Destination must hold
@@ -150,23 +156,45 @@ EOF
    DEST=$(echo "$DEST" | awk '{print $1;}')    # trim trailing spaces
    # currently, the decision on whether destination is a SD card is based upon "mmcblk"
    DEST_PARTITION=$(echo $DEST | awk '{print $1}')
-   if test $(echo $DEST | grep mmcblk); then
-      DEST_DEVICE=${DEST_PARTITION:0:(-2)}
-      dest_is_sd=True
-   else
-      dest_is_sd=False
-      DEST_DEVICE=${DEST_PARTITION:0:(-1)}
-      DEST_FREE=$(/usr/local/bin/df  | grep $DEST_PARTITION | awk '{print $4}')
-      DEST_FREE=$(expr $DEST_FREE \* 1024)
-   fi
-      
+   DEST_DEVICE=${DEST_PARTITION:0:(-1)}
+   DEST_FREE=$(/usr/local/bin/df  | grep $DEST_PARTITION | awk '{print $4}')
+   DEST_FREE=$(expr $DEST_FREE \* 1024)
    DEST_SIZE=$(fdisk -l $DEST_DEVICE | grep Disk | cut -d" " -f 5)
    echo $DEST_SIZE
+   dest_is_file=
+   echo $DEST_DEVICE | grep sda > /dev/null
+   if [ $? -eq 0 ];then
+      dest_is_file=true
+   fi
+}
+
+# Given a device like /dev/sdd
+# Return 0 if device is USB, 1 otherwise
+getDeviceType() {
+  typeset deviceName=/sys/block/${1#/dev/}
+  typeset deviceType=$(udevadm info --query=property --path="$deviceName" | grep -Po 'ID_BUS=\K\w+')
+  echo "$deviceType"
+}
+
+assertDeviceIsUSB() {
+   typeset deviceType
+   dest_is_usb=
+   if [ "$disableUSBCheck" == 'true' ]; then
+      echowarn "USB check has been disabled. Skipping."
+      return 0
+   fi
+   deviceType=$(getDeviceType "$selectedDevice")
+   if [ "$deviceType" != "usb" ]  ; then
+      msg=$(gettext "The device you selected is not connected through USB (found BUS: \`$deviceType'.\
+      Exiting ...")
+      title="FATAL ERROR"
+      dialog --title "$title" --yesno "$msg" 6 80
+      exit 1
+   fi
+   dest_is_usb=true
 }
 
 selectTruncate(){
-   SRC_SIZE=$(fdisk -l $SRC_PARTITION | grep Disk | cut -d" " -f 5)
-   #echo $SRC_SIZE
    # if the destination is much larger than source, let user select the smaller size
    SIZE_DIFF=$(expr $DEST_SIZE - $SRC_SIZE)
    # echo size_diff $SIZE_DIFF
@@ -175,11 +203,12 @@ selectTruncate(){
    QUERY=$(gettext "Minimize Source?")
    dialog --title "$QUERY" --yesno "$QUESTION" 6 80
    if test $? -eq 0; then
-     CHOSEN_SIZE=$MIN_SIZE
+      CHOSEN_SIZE=$MIN_SIZE
    else
-     CHOSEN_SIZE=$SRC_SIZE
+      CHOSEN_SIZE=$SRC_SIZE
    fi
 }
+
 dummy(){
 #   reminder expr returns 1 if true
    if [ $(expr $SIZE_DIFF \> 8000000000) -eq 1 ]; then
@@ -211,7 +240,7 @@ dummy(){
 }
 ################### Identify the copy  #####################
 
-# Fetch username and copy identifier
+# Fetch username and appropriate label
 createFilename(){
    # generate mount specifiers
    SRC_PARTITION_NIBBLE=${SRC_PARTITION:5}
@@ -219,11 +248,19 @@ createFilename(){
    DEST_PARTITION_NIBBLE=${DEST:5}
    DEST_MNT=/mnt/$DEST_PARTITION_NIBBLE
    TITLE=$(gettext "Please identify this copy")
+   name=
+   if [ -f /opt/name ]; then
+      name=$(cat /opt/name)
+   fi
+   label=
+   if [ -f /opt/label ]; then
+      label=$(cat /opt/label)
+   fi
    MSG=$(gettext "Requires name and short identifying label")
    exec 3>&1
    DATA=$(dialog --output-separator ":" --title "$TITLE" --form "$MSG" 10 80 3 \
-         "Name:" 1 1 "" 1 7 15 0 \
-         "Label:" 2  1 "" 2 7 16 0 \
+         "Name:" 1 1 "$name" 1 7 15 0 \
+         "Label:" 2  1 "$label" 2 7 16 0 \
          2>&1 1>&3)
    if test $? -ne 0 ; then exit 1; fi
    NAME=$(echo $DATA | awk -F: '{print $1;}')
@@ -231,14 +268,16 @@ createFilename(){
    # replace spaces with underscores
    NAME=$(echo $NAME | sed 's/ /_/g')
    LABEL=$(echo $LABEL | sed 's/ /_/g')
+   echo $LABEL > /opt/label
+   echo $NAME > /opt/name
    iiab_label $SRC_PARTITION $NAME $LABEL
    TARGET=$DEST_MNT/$(cat /tmp/identifier_filename)
-   echo $TARGET
+   echo $TARGET > /opt/lapdup_filename
 }
 
 # check source and destination exist
 existCheck(){
-   if [ "$dest_is_sd" = "True" ]; then
+   if [ "$dest_is_usb" = "true" ]; then
      write_to="$DEST_DEVICE"
    else
      write_to="$DEST_PARTITION"
@@ -251,10 +290,10 @@ existCheck(){
    fi
 }
 
-# check source is not host tree for running linux OS
+# check source is not open for running linux OS
 verifySourceNotBoot(){
-   BOOT_DEV=$(mount | grep boot | cut -d' ' -f1)
-   BOOT_DEV=${BOOT_DEV:0:-1}
+   BOOT_DEV=$(mount | grep -e boot -e rootfs | cut -d' ' -f1)
+   BOOT_DEV=${BOOT_DEV:0: (-1)}
    #echo boot_dev=$BOOT_DEV
    if [ "$BOOT_DEV" = "$SRC" ]; then
        title=$(gettext "Error")
@@ -267,7 +306,7 @@ verifySourceNotBoot(){
 
 # Check that a dd copy of source will fit on destination
 willItFit(){
-   if [ "$dest_is_sd" = "True" ]; then
+   if [ "$dest_is_file" != "true" ]; then
       output_size="$DEST_SIZE"
    else
       output_size="$DEST_FREE"
@@ -277,10 +316,13 @@ willItFit(){
      title=$(gettext "Fatal ERROR . . . Quitting")
      dialog --title "$title"  --msgbox "$msg" 10 70 
      exit 1
-   elif [ $(expr "$CHOSEN_SIZE" \< "$output_size") -eq 1 ] ; then
+   fi
+}
+save (){
+   if [ $(expr "$CHOSEN_SIZE" \< "$output_size") -eq 1 ] ; then
      echo Chosen size:$CHOSEN_SIZE   output size:$outpus_size
      msg=$(gettext "Truncation of Source is required. \n \
-      Source bytes: $CHOSEN_SIZE.   Destination bytes: $DEST_SIZE \n \
+      Source bytes: $CHOSEN_SIZE.   Destination bytes: $output_size \n \
       OK to proceed?")
      human=$(bytesToHuman $CHOSEN_SIZE)
      title=$(gettext "Proceed with resizing Source to $human? \
@@ -290,7 +332,6 @@ willItFit(){
    fi
 }
 #####################  Confirm Choices     ###########################
-echo optional
 optionalTruncation(){
    if [ "$SRC_SIZE" = "$CHOSEN_SIZE" ]; then
       SOURCE_TRUNCATE=NO
@@ -298,7 +339,7 @@ optionalTruncation(){
       SOURCE_TRUNCATE=YES
    fi
 
-   if [ "$dest_is_sd" = "True" ]; then
+   if [ "$dest_is_usb" = "true" ]; then
       DEST_INFO=$(gettext "Destination device: $DEST_DEVICE")
    else
       DEST_INFO=$(gettext "Destination filename: $TARGET")
@@ -312,17 +353,22 @@ optionalTruncation(){
    if test $? -ne 0; then exit 1; fi
 }
 #####################  Final Sanity Check  ###########################
-echo final
-finalVerificatioon(){
+finalVerification(){
+   if [ "$dest_is_file" != "true" ]; then
+      write_to="$DEST_DEVICE"
+      output_size="$DEST_SIZE"
+   else
+      write_to="$DEST_PARTITION"
+      output_size="$DEST_FREE"
+   fi
   title=$(gettext "Final Verification")
-  msg=$(gettext "Source: $SRC")
-  #dialog --title "$title" --msgbox "$msg" 20 70 1
-  ret=$( truncate $SRC_PARTITION $CHOSEN_SIZE )
+  msg=$(gettext "\n\nSource: $SRC  Bytes to copy: $CHOSEN_SIZE \
+  \nDestination: $write_to   \n\nSpace on Destination: $output_size")
+  dialog --title "$title" --yesno "$msg" 20 80
   if test $? -ne 0 ; then exit 1; fi
 }
 
 ####################### copy the data #################################
-echo ddcopy
 ddCopy(){
    # figure out how many erase_blocks to write
    dsize=$CHOSEN_SIZE
@@ -350,7 +396,7 @@ ddCopy(){
 echo cleanup
 cleanup(){
    umount /mnt/SRC_DEVICE
-   if [ "$dest_is_sd" = "True" ]; then
+   if [ "$dest_is_usb" = "true" ]; then
       umount $TARGET
    fi
 }
@@ -360,12 +406,14 @@ main(){
    initialize "$@"
    checkSudo "$@"
    selectSource
-   verifySoureNotBoot
+   verifySourceNotBoot
    selectDestination
-   if [  "$dest_is_sd" != "True" ]; then
+   if [  "$dest_is_file" != "true" ]; then
     createFilename
+   else
+      assertDeviceIsUSB
    fi
-   selecTruncate
+#   selecTruncate
    willItFit
    finalVerification
 #   ddCopy
