@@ -1,6 +1,5 @@
 #!/bin/bash -x
 # fast copy (using dd) IIAB to an image, or a  second SD card
-# tiny core notes: gawk, bash, e2fsprogs, dialog, gparted
 
 # Bring in useful functions
 source truncate.sh
@@ -182,14 +181,14 @@ else
 fi
    
 DEST_SIZE=$(fdisk -l $DEST_DEVICE | grep Disk | cut -d" " -f 5)
-echo dest size: $DEST_SIZE
+#echo dest size: $DEST_SIZE
 
 erase_block=8192   # size in sectors
 SRC_SIZE=$(fdisk -l $SRC_PARTITION | grep Disk | cut -d" " -f 5)
-echo $SRC_SIZE
+#echo $SRC_SIZE
 # if the destination is much larger than source, let user select the smaller size
 SIZE_DIFF=$(expr $DEST_SIZE - $SRC_SIZE)
-echo size_diff $SIZE_DIFF
+# echo size_diff $SIZE_DIFF
 
 QUESTION=$(gettext "Do you want to shrink the Source, even if it will fit without this step?")
 QUERY=$(gettext "Minimize Source?")
