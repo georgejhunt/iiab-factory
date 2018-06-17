@@ -58,147 +58,129 @@ while (( $# )) ; do
          usage; exit 0 ;;
     -d|--dest)
          PARTITION="$2"; shift 2;;
-    -L|--log)
-         LOGFILE="$2"; shift 2;;
     *) usage ; exit 1 ;;
     esac
 done
 
-# Check for dialog, whiptail, gdialog, awk, ... ?
-if type -p whiptail > /dev/null; then
-    DIALOG=whiptail
-else
-  if type -p dialog > /dev/null; then
-    dialog_wrapper() {
-      X1="$1"
-      X2="$2"
-      if [ $1 = --yesno ]; then
-        X3=`expr $3 + 2`
-      else
-        X3=$3
-      fi
-      shift 3
-      dialog "$X1" "$X2" $X3 "$@"
-    }
-    DIALOG=dialog_wrapper
-  else
-    xecho "Error, dialog or whiptail not found."
-    exit 1
+initialize{}{
+   # mount all the partitions so that df can return usage
+   for dev in `ls /mnt`; do
+     if test "$dev" = "sr0"; then continue; fi
+     if ! grep $dev /etc/mtab > /dev/null; then
+        mount /dev/$dev /mnt/$dev 2>&1 > /dev/null
+     fi
+   done
+}
+
+checkSudo() {
+  if ((EUID != 0)); then
+    echo "Granting root privileges for $scriptName."
+    if [[ -t 1 ]]; then
+      sudo "$0" "$@"
+    else
+      exec 1>output_file
+      gksu "$0" "$@"
+    fi
+    exit
   fi
-fi
-if type -p awk > /dev/null; then :
-else
-  xecho "Error, awk not found. Can't continue."
-  exit 1
-fi
-
-
-#########    Error check devices #########
-# first, what size output device is wanted?
-# Some definitions -- hopefully smaller than any purchased device
-sector=512
-mbyte=2048 #sectors/megabyte
-sd16GB=15900000000
-sd32GB=31900000000
-sd64GB="63900000000"
-sd128GB="12790000000"
-P1_SIZE=40
-
-# mount all the partitions so that df can return usage
-for dev in `ls /mnt`; do
-  if test "$dev" = "sr0"; then continue; fi
-  if ! grep $dev /etc/mtab > /dev/null; then
-     mount /dev/$dev /mnt/$dev 2>&1 > /dev/null
-  fi
-done
+}
 
 ################  Choose Source  ###################
-echo > /tmp/devices
-df -hT | grep mnt | grep -v -e Disk -e sdb | sort >> /tmp/devices
+selectSource(){
+   echo > /tmp/devices
+   df -hT | grep mnt | grep -v -e Disk -e sdb | sort >> /tmp/devices
 
-cat << EOF > /tmp/src
-   PAGE_TITLE=$(gettext "\"Choose Source SD Card\"")
-   MENU_TITLE=$(gettext "\"Choose Source -- Probably a mmcblk device of type ext4 \n\n\n \\
-   device            type        size      used       free     %       mounted to\n \\
-=================================================================================\"")
-   SRC=\$(dialog --title "\$PAGE_TITLE" --ok-label "Select" --default-item "/dev/mmcblk0p2  " \\
-    --menu "\$MENU_TITLE" 20 90 25    \\
-EOF
+   cat << EOF > /tmp/src
+      PAGE_TITLE=$(gettext "\"Choose Source SD Card\"")
+      MENU_TITLE=$(gettext "\"Choose Source -- Probably a mmcblk device of type ext4 \n\n\n \\
+      device            type        size      used       free     %       mounted to\n \\
+   =================================================================================\"")
+      SRC=\$(dialog --title "\$PAGE_TITLE" --ok-label "Select" --default-item "/dev/mmcblk0p2  " \\
+       --menu "\$MENU_TITLE" 20 90 25    \\
+   EOF
 
-while read line
-do
- awk ' { printf("\"%-16s\"  \"%-5s %10s %10s %10s %6s    %-15s\"  \\\n",$1,$2,$3,$4,$5,$6,$7);}'
-done < /tmp/devices >> /tmp/src
-echo  3\>\&1 1\>\&2 2\>\&3\) >> /tmp/src
-source /tmp/src
-if test $? -ne 0 ; then exit 1; fi
-SRC_PARTITION=$(echo $SRC | awk '{print $1}')
-SRC_DEVICE=${SRC_PARTITION:0:(-2)}
+   while read line
+   do
+    awk ' { printf("\"%-16s\"  \"%-5s %10s %10s %10s %6s    %-15s\"  \\\n",$1,$2,$3,$4,$5,$6,$7);}'
+   done < /tmp/devices >> /tmp/src
+   echo  3\>\&1 1\>\&2 2\>\&3\) >> /tmp/src
+   source /tmp/src
+   if test $? -ne 0 ; then exit 1; fi
+   SRC_PARTITION=$(echo $SRC | awk '{print $1}')
+   SRC_DEVICE=${SRC_PARTITION:0:(-2)}
+   echo $SRC
+}
 
 ####  Get the minimun size that Destination must hold
+getSourceMinSize(){
+   # but first warn user that getting minimun source size will take a while
+   delay=$(gettext "Using e2fsck to check the minimum size of $SRC_PARTITION, This may take some time. . .")
+   dialog --infobox "$delay" 7 60
 
-# but first warn user that getting minimun source size will take a while
-delay=$(gettext "Using e2fsck to check the minimum size of $SRC_PARTITION, This may take some time. . .")
-dialog --infobox "$delay" 7 60
-
-#MIN_SIZE=$( min_device_size "$SRC_PARTITION" )  # keep it all in bytes
-#echo minimum source size is $MIN_SIZE
-MIN_SIZE_TEXT=$(gettext "Data on Source Sd card occupies $(bytesToHuman "$MIN_SIZE")")
+   MIN_SIZE=$( min_device_size "$SRC_PARTITION" )  # keep it all in bytes
+   #echo minimum source size is $MIN_SIZE
+   MIN_SIZE_TEXT=$(gettext "Data on Source Sd card occupies $(bytesToHuman "$MIN_SIZE")")
+   echo $MIN_SIZE
+}
 
 ################  Choose Destination  ###################
-ignore=${SRC:0:9}
-echo > /tmp/devices1
-df -hT | grep mnt | grep -v -e Disk -e sdb -e $ignore| sort >> /tmp/devices1
+selectDestination(){
+   # the source should not be listed as a potential destination
+   ignore=${SRC:0:9}
+   echo > /tmp/devices1
+   df -hT | grep mnt | grep -v -e Disk -e sdb -e $ignore| sort >> /tmp/devices1
 
-cat << EOF > /tmp/dest
-   PAGE_TITLE=$(gettext "\"Choose Destination\"")
-   MENU_TITLE=$(gettext "\"Choose Destination -- Either hard disk of type ntfs, or another SD Card \n \\
-   \$MIN_SIZE_TEXT  \n\n\n \\
-   device            type        size      used       free     %       mounted to\n \\
-=================================================================================\"")
-   DEST=\$(dialog --title "\$PAGE_TITLE" --clear --ok-label "Select" --default-item "/dev/mmcblk0p2  " \\
-    --menu "\$MENU_TITLE" 20 90 25    \\
-EOF
+   cat << EOF > /tmp/dest
+      PAGE_TITLE=$(gettext "\"Choose Destination\"")
+      MENU_TITLE=$(gettext "\"Choose Destination -- Either hard disk of type ntfs, or another SD Card \n \\
+      \$MIN_SIZE_TEXT  \n\n\n \\
+      device            type        size      used       free     %       mounted to\n \\
+   =================================================================================\"")
+      DEST=\$(dialog --title "\$PAGE_TITLE" --clear --ok-label "Select" --default-item "/dev/mmcblk0p2  " \\
+       --menu "\$MENU_TITLE" 20 90 25    \\
+   EOF
 
-while read line
-do
- awk ' { printf("\"%-16s\"  \"%-5s %10s %10s %10s %6s    %-15s\"  \\\n",$1,$2,$3,$4,$5,$6,$7);}'
-done < /tmp/devices1 >> /tmp/dest
-echo  3\>\&1 1\>\&2 2\>\&3\) >> /tmp/dest
-source /tmp/dest
-if test $? -ne 0 ; then exit 1; fi
-DEST=$(echo "$DEST" | awk '{print $1;}')    # trim trailing spaces
-# currently, the decision on whether destination is a SD card is based upon "mmcblk"
-DEST_PARTITION=$(echo $DEST | awk '{print $1}')
-if test $(echo $DEST | grep mmcblk); then
-   DEST_DEVICE=${DEST_PARTITION:0:(-2)}
-   dest_is_sd=True
-else
-   dest_is_sd=False
-   DEST_DEVICE=${DEST_PARTITION:0:(-1)}
-   DEST_FREE=$(/usr/local/bin/df  | grep $DEST_PARTITION | awk '{print $4}')
-   DEST_FREE=$(expr $DEST_FREE \* 1024)
-fi
-   
-DEST_SIZE=$(fdisk -l $DEST_DEVICE | grep Disk | cut -d" " -f 5)
-#echo dest size: $DEST_SIZE
+   while read line
+   do
+    awk ' { printf("\"%-16s\"  \"%-5s %10s %10s %10s %6s    %-15s\"  \\\n",$1,$2,$3,$4,$5,$6,$7);}'
+   done < /tmp/devices1 >> /tmp/dest
+   echo  3\>\&1 1\>\&2 2\>\&3\) >> /tmp/dest
+   source /tmp/dest
+   if test $? -ne 0 ; then exit 1; fi
+   DEST=$(echo "$DEST" | awk '{print $1;}')    # trim trailing spaces
+   # currently, the decision on whether destination is a SD card is based upon "mmcblk"
+   DEST_PARTITION=$(echo $DEST | awk '{print $1}')
+   if test $(echo $DEST | grep mmcblk); then
+      DEST_DEVICE=${DEST_PARTITION:0:(-2)}
+      dest_is_sd=True
+   else
+      dest_is_sd=False
+      DEST_DEVICE=${DEST_PARTITION:0:(-1)}
+      DEST_FREE=$(/usr/local/bin/df  | grep $DEST_PARTITION | awk '{print $4}')
+      DEST_FREE=$(expr $DEST_FREE \* 1024)
+   fi
+      
+   DEST_SIZE=$(fdisk -l $DEST_DEVICE | grep Disk | cut -d" " -f 5)
+   echo $DEST_SIZE
+}
 
 erase_block=8192   # size in sectors
-SRC_SIZE=$(fdisk -l $SRC_PARTITION | grep Disk | cut -d" " -f 5)
-#echo $SRC_SIZE
-# if the destination is much larger than source, let user select the smaller size
-SIZE_DIFF=$(expr $DEST_SIZE - $SRC_SIZE)
-# echo size_diff $SIZE_DIFF
+selectTruncate{}{
+   SRC_SIZE=$(fdisk -l $SRC_PARTITION | grep Disk | cut -d" " -f 5)
+   #echo $SRC_SIZE
+   # if the destination is much larger than source, let user select the smaller size
+   SIZE_DIFF=$(expr $DEST_SIZE - $SRC_SIZE)
+   # echo size_diff $SIZE_DIFF
 
-QUESTION=$(gettext "Do you want to shrink the Source, even if it will fit without this step?")
-QUERY=$(gettext "Minimize Source?")
-dialog --title "$QUERY" --yesno "$QUESTION" 6 80
-if test $? -eq 0; then
-  CHOSEN_SIZE=$MIN_SIZE
-else
-  CHOSEN_SIZE=$SRC_SIZE
-fi
-
+   QUESTION=$(gettext "Do you want to shrink the Source, even if it will fit without this step?")
+   QUERY=$(gettext "Minimize Source?")
+   dialog --title "$QUERY" --yesno "$QUESTION" 6 80
+   if test $? -eq 0; then
+     CHOSEN_SIZE=$MIN_SIZE
+   else
+     CHOSEN_SIZE=$SRC_SIZE
+   fi
+}
 #   reminder expr returns 1 if true
 if [ $(expr $SIZE_DIFF \> 8000000000) -eq 1 ]; then
    MENU_TITLE=$(gettext "Data on Source Sd card occupies $(bytesToHuman "$MIN_SIZE")")
@@ -227,127 +209,144 @@ if [ $(expr $SIZE_DIFF \> 8000000000) -eq 1 ]; then
 fi
 
 ################### Identify the copy  #####################
-# generate mount specifiers
-SRC_PARTITION_NIBBLE=${SRC_PARTITION:5}
-SRC_MNT=/mnt/$SRC_PARTITION_NIBBLE
-DEST_PARTITION_NIBBLE=${DEST:5}
-DEST_MNT=/mnt/$DEST_PARTITION_NIBBLE
 
 # Fetch username and copy identifier
-TITLE=$(gettext "Please identify this copy")
-MSG=$(gettext "Requires name and short identifying label")
-exec 3>&1
-DATA=$(dialog --output-separator ":" --title "$TITLE" --form "$MSG" 10 80 3 \
-      "Name:" 1 1 "" 1 7 15 0 \
-      "Label:" 2  1 "" 2 7 16 0 \
-      2>&1 1>&3)
-if test $? -ne 0 ; then exit 1; fi
-NAME=$(echo $DATA | awk -F: '{print $1;}')
-LABEL=$(echo $DATA | awk -F: '{print $2;}')
-# replace spaces with underscores
-NAME=$(echo $NAME | sed 's/ /_/g')
-LABEL=$(echo $LABEL | sed 's/ /_/g')
-iiab_label $SRC_PARTITION $NAME $LABEL
-TARGET=$DEST_MNT/$(cat /tmp/identifier_filename)
-echo $TARGET
+createFilename(){
+   # generate mount specifiers
+   SRC_PARTITION_NIBBLE=${SRC_PARTITION:5}
+   SRC_MNT=/mnt/$SRC_PARTITION_NIBBLE
+   DEST_PARTITION_NIBBLE=${DEST:5}
+   DEST_MNT=/mnt/$DEST_PARTITION_NIBBLE
+   TITLE=$(gettext "Please identify this copy")
+   MSG=$(gettext "Requires name and short identifying label")
+   exec 3>&1
+   DATA=$(dialog --output-separator ":" --title "$TITLE" --form "$MSG" 10 80 3 \
+         "Name:" 1 1 "" 1 7 15 0 \
+         "Label:" 2  1 "" 2 7 16 0 \
+         2>&1 1>&3)
+   if test $? -ne 0 ; then exit 1; fi
+   NAME=$(echo $DATA | awk -F: '{print $1;}')
+   LABEL=$(echo $DATA | awk -F: '{print $2;}')
+   # replace spaces with underscores
+   NAME=$(echo $NAME | sed 's/ /_/g')
+   LABEL=$(echo $LABEL | sed 's/ /_/g')
+   iiab_label $SRC_PARTITION $NAME $LABEL
+   TARGET=$DEST_MNT/$(cat /tmp/identifier_filename)
+   echo $TARGET
+}
 
 # check source and destination exist
-if [ "$dest_is_sd" = "True" ]; then
-  write_to="$DEST_DEVICE"
-else
-  write_to="$DEST_PARTITION"
-fi
-if [ ! -e "$write_to" ] || [ ! -e "$SRC_DEVICE" ]; then  
-    title=$(gettext "Result")
-    msg=$(gettext "Source $SRC_DEVICE or Destination $write_to not found")
-    dialog --title "$title"  --msgbox "$msg" 20 60
-    exit 1
-fi
-
+existCheck(){
+   if [ "$dest_is_sd" = "True" ]; then
+     write_to="$DEST_DEVICE"
+   else
+     write_to="$DEST_PARTITION"
+   fi
+   if [ ! -e "$write_to" ] || [ ! -e "$SRC_DEVICE" ]; then  
+       title=$(gettext "Result")
+       msg=$(gettext "Source $SRC_DEVICE or Destination $write_to not found")
+       dialog --title "$title"  --msgbox "$msg" 20 60
+       exit 1
+   fi
+}
 # check source is not host tree for running linux OS
-BOOT_DEV=$(mount | grep boot | cut -d' ' -f1)
-BOOT_DEV=${BOOT_DEV:0:-1}
-#echo boot_dev=$BOOT_DEV
-if [ "$BOOT_DEV" = "$SRC" ]; then
-    title=$(gettext "Error")
-    msg=$(gettext "Source cannot be the BOOT disk .. quitting")
-    echo $msg
-    dialog --title "$title"  --msgbox "$msg" 20 60 
-    exit 1
-fi
-
-# Check that a dd copy of source will fit on destination
-if [ "$dest_is_sd" = "True" ]; then
-   output_size="$DEST_SIZE"
-else
-   output_size="$DEST_FREE"
-if [ $(expr "$CHOSEN_SIZE" \> "$output_size") -eq 1 ] ; then
-  msg=$(gettext "The source $SRC_PARTITION will not fit on the destination $DEST_PARTITION")
-  title=$(gettext "Fatal ERROR . . . Quitting")
-  dialog --title "$title"  --msgbox "$msg" 10 70 
-  exit 1
-elif [ $(expr "$CHOSEN_SIZE" \< "$output_size") -eq 1 ] ; then
-  echo Chosen size:$CHOSEN_SIZE   output size:$outpus_size
-  msg=$(gettext "Truncation of Source is required. \n \
-   Source bytes: $CHOSEN_SIZE.   Destination bytes: $DEST_SIZE \n \
-   OK to proceed?")
-  human=$(bytesToHuman $CHOSEN_SIZE)
-  title=$(gettext "Proceed with resizing Source to $human? \
-Both Source and Destination will be set to expand upon reboot")
-  dialog --title "$title"  --yesno "$msg" 10 70 
-  if test $? -ne 0 ; then exit 1; fi
-
-fi
+verifySourceNotBoot(){
+   BOOT_DEV=$(mount | grep boot | cut -d' ' -f1)
+   BOOT_DEV=${BOOT_DEV:0:-1}
+   #echo boot_dev=$BOOT_DEV
+   if [ "$BOOT_DEV" = "$SRC" ]; then
+       title=$(gettext "Error")
+       msg=$(gettext "Source cannot be the BOOT disk .. quitting")
+       echo $msg
+       dialog --title "$title"  --msgbox "$msg" 10 60 
+       exit 1
+   fi
+}
+   else
+      output_size="$DEST_FREE"
+   if [ $(expr "$CHOSEN_SIZE" \> "$output_size") -eq 1 ] ; then
+     msg=$(gettext "The source $SRC_PARTITION will not fit on the destination $DEST_PARTITION")
+     title=$(gettext "Fatal ERROR . . . Quitting")
+     dialog --title "$title"  --msgbox "$msg" 10 70 
+     exit 1
+   elif [ $(expr "$CHOSEN_SIZE" \< "$output_size") -eq 1 ] ; then
+     echo Chosen size:$CHOSEN_SIZE   output size:$outpus_size
+     msg=$(gettext "Truncation of Source is required. \n \
+      Source bytes: $CHOSEN_SIZE.   Destination bytes: $DEST_SIZE \n \
+      OK to proceed?")
+     human=$(bytesToHuman $CHOSEN_SIZE)
+     title=$(gettext "Proceed with resizing Source to $human? \
+   Both Source and Destination will be set to expand upon reboot")
+     dialog --title "$title"  --yesno "$msg" 10 70 
+     if test $? -ne 0 ; then exit 1; fi
+   fi
+}
 #####################  Confirm Choices     ###########################
-if [ "$SRC_SIZE" = "$CHOSEN_SIZE" ]; then
-   SOURCE_TRUNCATE=NO
-else
-   SOURCE_TRUNCATE=YES
-fi
+oprionlTruncation(){
+   if [ "$SRC_SIZE" = "$CHOSEN_SIZE" ]; then
+      SOURCE_TRUNCATE=NO
+   else
+      SOURCE_TRUNCATE=YES
+   fi
 
-if test "$dest_is_sd" = "True"; then
-   DEST_INFO=$(gettext "Destination device: $DEST_DEVICE")
-else
-   DEST_INFO=$(gettext "Destination specifier: "$TARGET"
-fi
+   if test "$dest_is_sd" = "True"; then
+      DEST_INFO=$(gettext "Destination device: $DEST_DEVICE")
+   else
+      DEST_INFO=$(gettext "Destination specifier: "$TARGET"
+   fi
 
-SRC_INFO=$(gettext "Source device: "$SRC_DEVICE") \
-Source will be truncated before copy: "$SOURCE_TRUNCATE" 
-TITLE=$(gettext Please Confirm the following COPY operation" )
-MSG="$SOURCE_INFO\n$DEST_INFO"
-dialog --Title "$TITLE" --yesno "$MSG" 7 70
-if test $? -ne 0; then exit 1; fi
+   SRC_INFO=$(gettext "Source device: "$SRC_DEVICE") \
+   Source will be truncated before copy: "$SOURCE_TRUNCATE" 
+   TITLE=$(gettext Please Confirm the following COPY operation" )
+   MSG="$SOURCE_INFO\n$DEST_INFO"
+   dialog --Title "$TITLE" --yesno "$MSG" 7 70
+   if test $? -ne 0; then exit 1; fi
 exit 1
 
-#####################  resize the source?  ###########################
-
+#####################  Final Sanity Check  ###########################
+finalVerificatioon(){
   title=$(gettext "Final Verification")
   msg=$(gettext "Source: $SRC")
   #dialog --title "$title" --msgbox "msg" 20 70 1
   ret=$( truncate $SRC_PARTITION $CHOSEN_SIZE )
   if test $? -ne 0 ; then exit 1; fi
-
+}
 
 ####################### copy the data #################################
-# figure out how many erase_blocks to write
-dsize=$CHOSEN_SIZE
-WRITE_COUNT=$( expr $CHOSEN_SIZE / $erase_block )
+ddCopy(){
+   # figure out how many erase_blocks to write
+   dsize=$CHOSEN_SIZE
+   WRITE_COUNT=$( expr $CHOSEN_SIZE / $erase_block )
 
-#dd status=progress if="$SRC" of="$DEVICE" bs=$erase_block count=$WRITE_COUNT 2>progress &
+   #dd status=progress if="$SRC" of="$DEVICE" bs=$erase_block count=$WRITE_COUNT 2>progress &
 
-# now read the progress file and update the gauge
-lastcopied=
-# debug messages upset guage
-set +x
-while true; do
-   sleep 5
-   copied=`cat progress | tr '\r' '\n' | tail -n1 | awk '{print $1}'`
-   if [ "$copied" = "$lastcopied" ]; then break; fi
-   lastcopied=$copied
-   percent=$(expr $copied \* 100 / $dsize) 
-   line=`cat progress | tr '\r' '\n' | tail -n1 `
-   echo XXX
-   echo $percent
-   echo $line
-   echo XXX 
-done | dialog --title "Image writing" --gauge "Burning the image on the SD card..." 10 78 0
+   # now read the progress file and update the gauge
+   lastcopied=
+   # debug messages upset guage
+   set +x
+   while true; do
+      sleep 5
+      copied=`cat progress | tr '\r' '\n' | tail -n1 | awk '{print $1}'`
+      if [ "$copied" = "$lastcopied" ]; then break; fi
+      lastcopied=$copied
+      percent=$(expr $copied \* 100 / $dsize) 
+      line=`cat progress | tr '\r' '\n' | tail -n1 `
+      echo XXX
+      echo $percent
+      echo $line
+      echo XXX 
+   done | dialog --title "Image writing" --gauge "Burning the image on the SD card..." 10 78 0
+}
+main(){
+  initialize "$@"
+  checkSudo "$@"
+  selectSource
+  verifySoureNotBoot
+  selectDestination
+  finalVerification
+  ddCopy
+}
+
+trap cleanup EXIT INT TERM
+
+main "$@"
