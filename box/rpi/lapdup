@@ -56,7 +56,19 @@ while (( $# )) ; do
     esac
 done
 
+initDevicesList() {
+  typeset -a devices
+  mapfile -t devices < <(lsblk -o NAME,TYPE | grep --color=never -oP '^\K\w+(?=\s+disk$)')
+  for device in "${devices[@]}" ; do
+    if [ "$(getDeviceType "/dev/$device")" == "usb" ] || [ "$disableUSBCheck" == 'true' ]; then
+      devicesList+=("$device")
+    fi
+  done
+}
+
 initialize(){
+   typeset -a devicesList
+   initDevicesList
    prefix=/usr/local
    exec_prefix=${prefix}
    bindir=${exec_prefix}/bin
@@ -112,7 +124,8 @@ EOF
    SRC_PARTITION=$(echo $SRC | awk '{print $1}')
    SRC_DEVICE=${SRC_PARTITION:0:(-2)}
    echo $SRC
-   SRC_SIZE=$(fdisk -l $SRC_PARTITION | grep Disk | cut -d" " -f 5)
+   SRC_SIZE=$(fdisk -l $SRC_DEVICE | grep Linux | awk '{print $4;}')
+   SRC_SIZE=$(expr $SRC_SIZE \* 512)
    CHOSEN_SIZE=$SRC_SIZE
    echo $SRC_SIZE
 }
@@ -358,11 +371,11 @@ finalVerification(){
       write_to="$DEST_DEVICE"
       output_size="$DEST_SIZE"
    else
-      write_to="$DEST_PARTITION"
+      write_to="$TARGET"
       output_size="$DEST_FREE"
    fi
   title=$(gettext "Final Verification")
-  msg=$(gettext "\n\nSource: $SRC  Bytes to copy: $CHOSEN_SIZE \
+  msg=$(gettext "\n\nSource: $SRC_DEVICE  Bytes to copy: $CHOSEN_SIZE \
   \nDestination: $write_to   \n\nSpace on Destination: $output_size")
   dialog --title "$title" --yesno "$msg" 20 80
   if test $? -ne 0 ; then exit 1; fi
@@ -370,11 +383,18 @@ finalVerification(){
 
 ####################### copy the data #################################
 ddCopy(){
+   if [ "$dest_is_file" != "true" ]; then
+      write_to="$DEST_DEVICE"
+   else
+      write_to="$TARGET"
+   fi
    # figure out how many erase_blocks to write
-   dsize=$CHOSEN_SIZE
-   WRITE_COUNT=$( expr $CHOSEN_SIZE / $erase_block )
+   WRITE_COUNT=$( expr $CHOSEN_SIZE / 4192 + 1 )
 
-   #dd status=progress if="$SRC" of="$DEVICE" bs=$erase_block count=$WRITE_COUNT 2>progress &
+   # at boot, the read-only driver loads
+   umount $DEST_PARTITION
+   mount -t ntfs-3g "$DEST_MNT"
+   dd status=progress if="$SRC_DEVICE" of="$write_to" bs=4192 count=$WRITE_COUNT 2>progress &
 
    # now read the progress file and update the gauge
    lastcopied=
@@ -385,7 +405,7 @@ ddCopy(){
       copied=`cat progress | tr '\r' '\n' | tail -n1 | awk '{print $1}'`
       if [ "$copied" = "$lastcopied" ]; then break; fi
       lastcopied=$copied
-      percent=$(expr $copied \* 100 / $dsize) 
+      percent=$(expr $copied \* 100 / $CHOSEN_SIZE) 
       line=`cat progress | tr '\r' '\n' | tail -n1 `
       echo XXX
       echo $percent
@@ -408,15 +428,15 @@ main(){
    selectSource
    verifySourceNotBoot
    selectDestination
-   if [  "$dest_is_file" != "true" ]; then
-    createFilename
+   if [  "$dest_is_file" = "true" ]; then
+      createFilename
    else
       assertDeviceIsUSB
    fi
 #   selecTruncate
    willItFit
    finalVerification
-#   ddCopy
+   ddCopy
 }
 
 trap cleanup EXIT INT TERM
