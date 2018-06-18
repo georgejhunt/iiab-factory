@@ -1,7 +1,9 @@
 #!/bin/bash -x
-# fast copy (using dd) IIAB to an image, or a  second SD card
+# fast copy (using dd) IIAB to an disk image, or a  second SD card; optionally minify image
 
 # Author: george hunt <georgejhunt.gmail.com> https://github.com/georgejhunt/iiab-factory
+copyright 2018 by George Hunt
+License: GPL Version 2
 # Ideas and structure attribution:   jules randolph <jules.sam.randolph@gmail.com> https://github.com/jsamr/bootiso
 
 # Bring in useful functions
@@ -30,12 +32,6 @@ xmsg() {
   shift
   printf "$msg" $*
 }
-
-# Check for root privileges
-if [ `id -u` -ne 0 ]; then
-  xecho "You must be root to use this script."
-  exit 1
-fi
 
 #########   User interface command line stuff #########
 usage() {
@@ -413,18 +409,7 @@ ddCopy(){
       echo XXX 
    done | dialog --title "Image writing" --gauge "Burning the image on the SD card..." 10 78 0
 }
-echo cleanup
-cleanup(){
-   umount /mnt/SRC_DEVICE
-   if [ "$dest_is_usb" = "true" ]; then
-      umount $TARGET
-   fi
-}
-
-echo main
-main(){
-   initialize "$@"
-   checkSudo "$@"
+copySD(){
    selectSource
    verifySourceNotBoot
    selectDestination
@@ -433,10 +418,68 @@ main(){
    else
       assertDeviceIsUSB
    fi
-#   selecTruncate
    willItFit
    finalVerification
    ddCopy
+}
+
+makeSmaller(){
+   true
+}
+
+image2SD(){
+   true
+}
+#######################   Main Menu   ###############################
+mainMenu(){
+   choice1=$(gettext "Copy to SD Card or hard disk")
+   choice2=$(gettext "Reduce the size of hard disk image")
+   choice3=$(gettext "Copy from hard disk image to SD card")
+   choice4=$(gettext "Delete hard disk image")
+   choice5=$(gettext "Help")
+   choice6=$(gettext "Exit to command line terminal")
+   title=$(gettext "Main Menu")
+   msg=$(gettext "\n\nPlease choose from the following options:")
+   ACTION=$(dialog --title "$title"  --ok-button Select --menu "$msg" 17 80 7   \
+   "copysd" "$choice1" \
+   "smaller" "$choice2" \
+   "image2sd" "$choice3" \
+   "delete" "$choice4" \
+   "help" "$choice5" \
+   "terminal" "$choice6" \
+   3>&1 1>&2 2>&3)
+   if test $? -ne 0 ; then exit 1; fi
+   case "$ACTION" in
+      copysd) copySD
+         ;;
+      smaller) makeSmaller
+         ;;
+      image2sd) image2SD
+         ;;
+      terminal)
+         clear
+         exit 0
+         ;;
+      help|*)
+         usage
+         ;;
+   esac
+}
+
+cleanup(){
+   umount /mnt/SRC_DEVICE
+   if [ "$dest_is_usb" = "true" ]; then
+      umount "$DEST_DEVICE"
+   fi
+}
+
+echo main
+main(){
+   initialize "$@"
+   checkSudo "$@"
+   while true; do
+      mainMenu
+   done
 }
 
 trap cleanup EXIT INT TERM
