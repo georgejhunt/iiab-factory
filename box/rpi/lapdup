@@ -116,7 +116,7 @@ EOF
    done < /tmp/devices >> /tmp/src
    echo  3\>\&1 1\>\&2 2\>\&3\) >> /tmp/src
    source /tmp/src
-   if test $? -ne 0 ; then exit 1; fi
+   if test $? -ne 0 ; then return 99; fi
    SRC_PARTITION=$(echo $SRC | awk '{print $1}')
    SRC_DEVICE=${SRC_PARTITION:0:(-2)}
    echo $SRC
@@ -124,6 +124,7 @@ EOF
    SRC_SIZE=$(expr $SRC_SIZE \* 512)
    CHOSEN_SIZE=$SRC_SIZE
    echo $SRC_SIZE
+   return 0
 }
 
 ####  Get the minimun size that Destination must hold
@@ -136,6 +137,7 @@ getSourceMinSize(){
    #echo minimum source size is $MIN_SIZE
    MIN_SIZE_TEXT=$(gettext "Data on Source Sd card occupies $(bytesToHuman "$MIN_SIZE")")
    echo $MIN_SIZE
+   return 0
 }
 
 ################  Choose Destination  ###################
@@ -161,7 +163,7 @@ EOF
    done < /tmp/devices1 >> /tmp/dest
    echo  3\>\&1 1\>\&2 2\>\&3\) >> /tmp/dest
    source /tmp/dest
-   if test $? -ne 0 ; then exit 1; fi
+   if test $? -ne 0 ; then return 99; fi
    DEST=$(echo "$DEST" | awk '{print $1;}')    # trim trailing spaces
    # currently, the decision on whether destination is a SD card is based upon "mmcblk"
    DEST_PARTITION=$(echo $DEST | awk '{print $1}')
@@ -198,7 +200,7 @@ assertDeviceIsUSB() {
       Exiting ...")
       title="FATAL ERROR"
       dialog --title "$title" --yesno "$msg" 6 80
-      exit 1
+      return 99 
    fi
    dest_is_usb=true
 }
@@ -216,6 +218,7 @@ selectTruncate(){
    else
       CHOSEN_SIZE=$SRC_SIZE
    fi
+   return 0
 }
 
 dummy(){
@@ -246,6 +249,7 @@ dummy(){
          CHOSEN_SIZE=$MIN_SIZE
       fi
    fi
+   return 0
 }
 ################### Identify the copy  #####################
 
@@ -271,7 +275,7 @@ createFilename(){
          "Name:" 1 1 "$name" 1 7 15 0 \
          "Label:" 2  1 "$label" 2 7 16 0 \
          2>&1 1>&3)
-   if test $? -ne 0 ; then exit 1; fi
+   if test $? -ne 0 ; then return 99; fi
    NAME=$(echo $DATA | awk -F: '{print $1;}')
    LABEL=$(echo $DATA | awk -F: '{print $2;}')
    # replace spaces with underscores
@@ -282,6 +286,7 @@ createFilename(){
    iiab_label $SRC_PARTITION $NAME $LABEL
    TARGET=$DEST_MNT/$(cat /tmp/identifier_filename)
    echo $TARGET > /opt/lapdup_filename
+   return 0
 }
 
 # check source and destination exist
@@ -295,8 +300,9 @@ existCheck(){
        title=$(gettext "Result")
        msg=$(gettext "Source $SRC_DEVICE or Destination $write_to not found")
        dialog --title "$title"  --msgbox "$msg" 20 60
-       exit 1
+       return 99 
    fi
+   return 0
 }
 
 # check source is not open for running linux OS
@@ -309,8 +315,9 @@ verifySourceNotBoot(){
        msg=$(gettext "Source cannot be the BOOT disk .. quitting")
        echo $msg
        dialog --title "$title"  --msgbox "$msg" 10 60 
-       exit 1
+       return 99 
    fi
+   return 0
 }
 
 # Check that a dd copy of source will fit on destination
@@ -324,8 +331,9 @@ willItFit(){
      msg=$(gettext "The source $SRC_PARTITION will not fit on the destination $DEST_PARTITION")
      title=$(gettext "Fatal ERROR . . . Quitting")
      dialog --title "$title"  --msgbox "$msg" 10 70 
-     exit 1
+     return 99 
    fi
+   return 0
 }
 save (){
    if [ $(expr "$CHOSEN_SIZE" \< "$output_size") -eq 1 ] ; then
@@ -337,7 +345,7 @@ save (){
      title=$(gettext "Proceed with resizing Source to $human? \
      Both Source and Destination will be set to expand upon reboot")
      dialog --title "$title"  --yesno "$msg" 10 70 
-     if test $? -ne 0 ; then exit 1; fi
+     if test $? -ne 0 ; then return 99; fi
    fi
 }
 #####################  Confirm Choices     ###########################
@@ -359,7 +367,8 @@ optionalTruncation(){
    TITLE=$(gettext "Please Confirm the following COPY operation" )
    MSG="$SOURCE_INFO\n$DEST_INFO"
    dialog --Title "$TITLE" --yesno "$MSG" 7 70
-   if test $? -ne 0; then exit 1; fi
+   if test $? -ne 0; then return 99; fi
+   return 0
 }
 #####################  Final Sanity Check  ###########################
 finalVerification(){
@@ -374,7 +383,7 @@ finalVerification(){
   msg=$(gettext "\n\nSource: $SRC_DEVICE  Bytes to copy: $CHOSEN_SIZE \
   \nDestination: $write_to   \n\nSpace on Destination: $output_size")
   dialog --title "$title" --yesno "$msg" 20 80
-  if test $? -ne 0 ; then exit 1; fi
+  if test $? -ne 0 ; then return 99; fi
 }
 
 ####################### copy the data #################################
@@ -411,15 +420,20 @@ ddCopy(){
 }
 copySD(){
    selectSource
+   if [ $? -eq 99  ]; then return 99;  fi
    verifySourceNotBoot
+   if [ $? -eq 99  ]; then return 99;  fi
    selectDestination
+   if [ $? -eq 99  ]; then return 99;  fi
    if [  "$dest_is_file" = "true" ]; then
       createFilename
    else
       assertDeviceIsUSB
    fi
    willItFit
+   if [ $? -eq 99  ]; then return 99;  fi
    finalVerification
+   if [ $? -eq 99  ]; then return 99;  fi
    ddCopy
 }
 
@@ -440,7 +454,7 @@ mainMenu(){
    choice6=$(gettext "Exit to command line terminal")
    title=$(gettext "Main Menu")
    msg=$(gettext "\n\nPlease choose from the following options:")
-   ACTION=$(dialog --title "$title"  --ok-button Select --menu "$msg" 17 80 7   \
+   ACTION=$(dialog --title "$title"  --ok-button Select --cancel-button quit --menu "$msg" 17 80 7   \
    "copysd" "$choice1" \
    "smaller" "$choice2" \
    "image2sd" "$choice3" \
@@ -448,7 +462,7 @@ mainMenu(){
    "help" "$choice5" \
    "terminal" "$choice6" \
    3>&1 1>&2 2>&3)
-   if test $? -ne 0 ; then exit 1; fi
+   if test $? -ne 0 ; then exit 1 ; fi
    case "$ACTION" in
       copysd) copySD
          ;;
