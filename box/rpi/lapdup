@@ -169,7 +169,9 @@ EOF
    DEST_PARTITION=$(echo $DEST | awk '{print $1}')
    DEST_DEVICE=${DEST_PARTITION:0:(-1)}
    DEST_FREE=$(/usr/local/bin/df  | grep $DEST_PARTITION | awk '{print $4}')
-   DEST_FREE=$(expr $DEST_FREE \* 1024)
+   # coreutils tce make the above work - really required for dd progress
+#   DEST_FREE=$(/bin/df  | grep $DEST_PARTITION | awk '{print $4}')
+   DEST_FREE=$(expr "$DEST_FREE" \* 1024)
    DEST_SIZE=$(fdisk -l $DEST_DEVICE | grep Disk | cut -d" " -f 5)
    echo $DEST_SIZE
    dest_is_file=
@@ -328,7 +330,7 @@ willItFit(){
       output_size="$DEST_FREE"
    fi
    if [ $(expr "$CHOSEN_SIZE" \> "$output_size") -eq 1 ] ; then
-     msg=$(gettext "The source $SRC_PARTITION will not fit on the destination $DEST_PARTITION")
+     msg=$(gettext "The source $SRC_PARTITION ($CHOSEN_SIZE) will not fit on the destination $DEST_PARTITION" ($output_size))
      title=$(gettext "Fatal ERROR . . . Quitting")
      dialog --title "$title"  --msgbox "$msg" 10 70 
      return 99 
@@ -394,12 +396,12 @@ ddCopy(){
       write_to="$TARGET"
    fi
    # figure out how many erase_blocks to write
-   WRITE_COUNT=$( expr $CHOSEN_SIZE / 4192 + 1 )
+   WRITE_COUNT=$( echo "( $CHOSEN_SIZE / 4096 ) + 1" | bc )
 
    # at boot, the read-only driver loads
    umount $DEST_PARTITION
-   mount -t ntfs-3g "$DEST_MNT"
-   dd status=progress if="$SRC_DEVICE" of="$write_to" bs=4192 count=$WRITE_COUNT 2>progress &
+   mount -t ntfs-3g "DEST_PARTITION" "$DEST_MNT"
+   dd status=progress if="$SRC_DEVICE" of="$write_to" bs=4096 count=$WRITE_COUNT 2>progress &
 
    # now read the progress file and update the gauge
    lastcopied=
@@ -481,13 +483,12 @@ mainMenu(){
 }
 
 cleanup(){
-   umount /mnt/SRC_DEVICE
+   umount /mnt/$SRC_DEVICE
    if [ "$dest_is_usb" = "true" ]; then
       umount "$DEST_DEVICE"
    fi
 }
 
-echo main
 main(){
    initialize "$@"
    checkSudo "$@"
