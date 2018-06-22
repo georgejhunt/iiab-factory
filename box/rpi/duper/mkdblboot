@@ -46,7 +46,7 @@ sudo partprobe /dev/sdc
 sudo mke2fs -t ext2 -L tcore  -F /dev/$ext
 sudo mkfs.vfat /dev/$efi
 
-uuid=$(blkid /dev/$ext | cut -d'"' -f6)
+uuid=$(blkid /dev/$ext | cut -d'"' -f4)
 echo $uuid
 
 tce-load -i grub2-multi
@@ -69,17 +69,15 @@ pushd /mnt/$ext/boot
 sudo wget http://tinycorelinux.net/9.x/x86/release/distribution_files/vmlinuz
 sudo wget http://tinycorelinux.net/9.x/x86/release/distribution_files/vmlinuz64
 sudo wget http://tinycorelinux.net/9.x/x86/release/distribution_files/rootfs.gz
-duso wget http://tinycorelinux.net/9.x/x86/release/distribution_files/modules.gz
+sudo wget http://tinycorelinux.net/9.x/x86/release/distribution_files/modules.gz
 sudo wget http://tinycorelinux.net/9.x/x86/release/distribution_files/modules64.gz
 popd
 
 sudo cp iiab.lst /mnt/$ext/tce/
-for f in `cat /mnt/$ext/tce/iiab.lst`; do
-   tce-load -wi "$f"
-done
 
-sudo cp /mnt/$ext/tce/mydata.tgz /mnt/$ext/tce/mydata.tgz
-sudo cp -r /mnt/$ext/opt /mnt/$ext/opt
+sudo cp /mnt/sdb2/tce/mydata.tgz /mnt/$ext/tce/mydata.tgz
+sudo cp -r /mnt/sdb2/opt /mnt/$ext/
+sudo cp -f load.sh /mnt/$ext/tce
 
 pushd /mnt/$ext/opt/iiab
    sudo git clone https://github.com/iiab/iiab-factory
