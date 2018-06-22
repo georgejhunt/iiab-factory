@@ -1,56 +1,86 @@
 #!/bin/bash -x
 tce-load -wi dosfstools e2fsprogs
 
-umount /mnt/sdc1
-umount /mnt/sdc2
-sudo sfdisk -f /dev/sdc << EOF
-8192,+200MiB,1
-,+1G,83,L
+efi=sdc2
+ext=sdc3
+sudo umount /mnt/$efi
+sudo umount /mnt/$ext
+
+sudo fdisk /dev/sdc << EOF
+d
+
+d
+
+d
+
+n
+p
+1
+2048
++1M
+n
+p
+2
+
++200M
+n
+p
+3
+
++1G
+t
+1
+4
+t
+2
+1
+t
+3
+20
+w
 EOF
 
-sudo mke2fs -t ext4  -q /dev/sdc2
-sudo mkfs.vfat /dev/sdc1
+sleep 5
+sudo partprobe /dev/sdc
 
-uuid=$(blkid -l  /dev/sdc2 | cut -d'"' -f6)
+sudo mke2fs -t ext2 -L tcore  -F /dev/$ext
+sudo mkfs.vfat /dev/$efi
+
+uuid=$(blkid /dev/$ext | cut -d'"' -f6)
 echo $uuid
-tune2fs -U $uuid /dev/sdc1
-
 
 tce-load -i grub2-multi
-sudo mount /dev/sdc1 /mnt/sdc1
-sudo mount /dev/sdc2 /mnt/sdc2
+sudo mount /dev/$efi /mnt/$efi
+sudo mount /dev/$ext /mnt/$ext
 
-sudo grub-install --target=x86_64-efi --boot-directory=/mnt/sdc1/EFI/BOOT --efi-directory=/mnt/sdc1 --removable --directory=/usr/local/lib/grub/i386-efi/
+sudo grub-install -s --target=x86_64-efi --boot-directory=/mnt/$efi/EFI/BOOT --efi-directory=/mnt/$efi --removable --directory=/usr/local/lib/grub/i386-efi/
 if [ $? -ne 0 ];then exit 1;fi
-sudo grub-install --target=i386-pc --boot-directory=/mnt/sdc1/EFI/BOOT /dev/sdc
+sudo grub-install --target=i386-pc --boot-directory=/mnt/$efi/EFI/BOOT /dev/sdc
 if [ $? -ne 0 ];then exit 1;fi
 
-cd /mnt
-sudo mount sdc1
-sudo mount sdc2
-cat grub.cfg | sed -e "s/IIAB_TOKEN/$uuid/g > /mnt/sdc1/EFI/BOOT/grub/grub.cfg
+cat grub.cfg | sed -e "s/IIAB_TOKEN/$uuid/g" | sudo tee /mnt/$efi/EFI/BOOT/grub/grub.cfg
 
-mkdir -p /mnt/sdc2/boot
-mkdir -p /mnt/sdc2/tce/optional
-mkdir -p /mnt/sdc2/opt/iiab
-mkdir -p /mnt/sdc2/home
+sudo mkdir -p /mnt/$ext/boot
+sudo mkdir -p /mnt/$ext/tce/optional
+sudo mkdir -p /mnt/$ext/opt/iiab
+sudo mkdir -p /mnt/$ext/home
 
-pushd /mnt/sdc2/boot
-wget http://tinycorelinux.net/9.x/x86/release/distribution_files/vmlinuz
-wget http://tinycorelinux.net/9.x/x86/release/distribution_files/vmlinuz64
-wget http://tinycorelinux.net/9.x/x86/release/distribution_files/rootfs.gz
-wget http://tinycorelinux.net/9.x/x86/release/distribution_files/modules.gz
-wget http://tinycorelinux.net/9.x/x86/release/distribution_files/modules64.gz
+pushd /mnt/$ext/boot
+sudo wget http://tinycorelinux.net/9.x/x86/release/distribution_files/vmlinuz
+sudo wget http://tinycorelinux.net/9.x/x86/release/distribution_files/vmlinuz64
+sudo wget http://tinycorelinux.net/9.x/x86/release/distribution_files/rootfs.gz
+duso wget http://tinycorelinux.net/9.x/x86/release/distribution_files/modules.gz
+sudo wget http://tinycorelinux.net/9.x/x86/release/distribution_files/modules64.gz
 popd
 
-cp iiab.lst /mnt/sdc2/tce/
-for f in `cat /mnt/sdc2/tce/iiab.lst`; do
+sudo cp iiab.lst /mnt/$ext/tce/
+for f in `cat /mnt/$ext/tce/iiab.lst`; do
    tce-load -wi "$f"
 done
 
-cp /mnt/sdb2/tce/mydata.tgz /mnt/sdc2/tce/mydata.tgz
-cp -r /mnt/sdb2/opt /mnt/sdc2/opt
+sudo cp /mnt/$ext/tce/mydata.tgz /mnt/$ext/tce/mydata.tgz
+sudo cp -r /mnt/$ext/opt /mnt/$ext/opt
 
-pushd /mnt/sdc2/opt/iiab
-git clone https://github.com/iiab/iiab-factory
+pushd /mnt/$ext/opt/iiab
+   sudo git clone https://github.com/iiab/iiab-factory
 popd
