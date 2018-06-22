@@ -1,0 +1,124 @@
+
+efi=sdc2
+ext=sdc3
+PERSIST=/mnt/$ext
+ARCH="x86"
+CORE_VERSION=9.x
+cd $PERSIST/tce/optional
+
+function p_error {
+    if [ "$COLOUR" = "yes" ]; then
+        echo -e "\e[1;91m$1\e[0;39m"
+    else
+        echo "$1"
+    fi
+}
+
+function p_warning {
+    if [ "$COLOUR" = "yes" ]; then
+        echo -e "\e[1;93m$1\e[0;39m"
+    else
+        echo "$1"
+    fi
+}
+
+function p_informational {
+    if [ "$COLOUR" = "yes" ]; then
+        echo -e "\e[1;92m$1\e[0;39m"
+    else
+        echo "$1"
+    fi
+}
+
+function p_begin {
+    if [ "$COLOUR" = "yes" ]; then
+        echo -ne "\e[1;96m$1\e[0;39m"
+    else
+        echo -n "$1"
+    fi
+}
+
+function p_end {
+    if [ "$COLOUR" = "yes" ]; then
+        echo -e "\e[1;92m$1\e[0;39m"
+    else
+        echo "$1"
+    fi
+}
+
+    # download tiny core extension
+    cat <<EOF > $PERSIST/tce/iiab.lst
+aterm.tcz
+wifi.tcz
+wl-modules-4.14.10-tinycore.tcz
+iw.tcz
+pci-utils.tcz
+firmware-atheros.tcz
+firmware-broadcom_bcm43xx.tcz
+firmware-broadcom_bnx2.tcz
+firmware-broadcom_bnx2x.tcz
+firmware-getB43.tcz
+firmware-ipw2100.tcz
+firmware-ipw2200.tcz
+firmware-iwimax.tcz
+firmware-iwl8000.tcz
+firmware-iwl9000.tcz
+firmware-iwlwifi.tcz
+firmware-marvel.tcz
+firmware-myri10ge.tcz
+firmware-netxen.tcz
+firmware-openfwwf.tcz
+firmware-ralinkwifi.tcz
+firmware-rtl8192ce_se_de.tcz
+firmware-rtlwifi.tcz
+firmware-ti-connectivity.tcz
+firmware-ueagle-atm.tcz
+firmware-vxge.tcz
+firmware-zd1211.tcz
+firmware.tcz
+git.tcz
+tree.tcz
+vim.tcz
+bash.tcz
+openssh.tcz
+slocate.tcz
+grub2-multi.tcz
+util-linux.tcz
+openvpn.tcz
+man.tcz
+nmap.tcz
+dialog.tcz
+ntfs-3g.tcz
+coreutils.tcz
+bc.tcz
+flex.tcz
+EOF
+
+# wait for the new file to be available
+sync
+
+p_begin "Checking Tiny Core extensions ... "
+base=http://repo.tinycorelinux.net/${CORE_VERSION}
+cd $PERSIST/tce/optional
+flags="-q -c "
+for file in $(<${PERSIST}/tce/onboot.lst); do
+    if [ ! -f $file ]; then
+        wget ${flags} ${base}/${ARCH}/tcz/$file  \
+        wget ${flags} ${base}/${ARCH}/tcz/$file.md5.txt  \
+        wget ${flags} ${base}/${ARCH}/tcz/$file.dep  \
+        p_end "got $file"
+    else
+        if [ $CACHE = no ]; then
+            rm -f $file.md5.txt
+            wget ${flags} ${base}/${ARCH}/tcz/$file.md5.txt  
+            if [ "$(cat $file.md5.txt | cut -f 1 -d ' ')" \
+                != "$(md5sum $file | cut -f 1 -d ' ')" ]; then
+                rm -f $file{,.dep}
+                wget ${flags} ${base}/${ARCH}/tcz/$file  \
+                wget ${flags} ${base}/${ARCH}/tcz/$file.dep \
+                p_end "updated $file"
+            fi
+        fi
+    fi
+done
+p_end "ok"

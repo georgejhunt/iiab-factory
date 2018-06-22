@@ -1,0 +1,466 @@
+#!/bin/bash -x
+
+# first part makes iso image from tiny core,c
+# second part sets up data for XSCE target
+# Last part creates the image which gets copied onto USB stick
+
+# somewhat based on James Cameron's mktinycorxo at
+# http://dev.laptop.org/git/users/quozl/mktinycorexo
+# Stick required is at least 2G USB
+
+PREFIX="/root/installer"
+mkdir -p $PREFIX/persist/tce
+NEWPAYLOAD_ARCH=
+PAYLOAD=
+PAYLOAD_ARCH=
+USBSIZE="3600" # in MB for just the data partition 
+
+
+# Let user decide whether to continue with last installer operation
+# Get the previous state
+# -- thoughts have evolved -- always start over
+rm $PREFIX/persist/tce/installer.conf
+
+NEWPAYLOAD='skip'
+# skip all of the following:
+if 1; then
+if [ -f $PREFIX/persist/tce/installer.conf ]; then
+	source $PREFIX/persist/tce/installer.conf
+fi
+echo
+echo
+read  -p  "The Payload from last operation was $PAYLOAD. Change y/N: " ans
+echo "  --and the architecture was $PAYLOAD_ARCH"
+case $ans in
+y|Y)
+	read  -p "New value for payload (default=netinst)? " ans
+	if [ "$ans" == "" ]; then
+		NEWPAYLOAD=netinst
+	else
+		NEWPAYLOAD=$ans
+	fi
+	;;
+*)
+	NEWPAYLOAD=$PAYLOAD
+	;;
+esac
+
+read  -p  "The arch from last operation was $PAYLOAD_ARCH. Change y/N: " ans
+case $ans in
+y|Y)
+	read  -p "New value for payload (default=x86_64)? " ans
+	if [ "$ans" == "" ]; then
+		NEWPAYLOAD_ARCH=x86_64
+	else
+		NEWPAYLOAD_ARCH=$ans
+	fi
+	;;
+*)
+	NEWPAYLOAD_ARCH=$PAYLOAD_ARCH
+	;;
+esac
+fi
+#=================================================================================
+# create a configuration file to pass to tiny core linux (centralize variables)
+#  To start a new install process from downloaded netinst, remove persist/tct/installer.conf
+
+if [[ $PAYLOAD != $NEWPAYLOAD || \
+	$PAYLOAD_ARCH != $NEWPAYLOAD_ARCH || \
+        ! -f $PREFIX/persist/tce/installer.conf ]]; then
+cat << EOF > $PREFIX/persist/tce/installer.conf
+#OS="centos"
+OS="fedora"
+FC_VER="21"
+FC_URL="http://mirrors.usc.edu/pub/linux/distributions/fedora/linux/releases/${FC_VER}/Fedora/${FC_ARCH}/os/images/"
+UK_URL="http://download.unleashkids.org/xsce/downloads/installer/tools/"
+ISO="${PREFIX}/iso_root"
+PERSIST="${PREFIX}/persist"
+PREFIX="${PREFIX}"
+# upstream versions, tiny core linux
+CORE_VERSION=7.x
+
+# tinycore initramfs name
+CORE_INITRD_X86=core
+#CORE_INITRD_X86=corepure64
+CORE_KERNEL_X86=vmlinuz
+#CORE_KERNEL_X86=vmlinuz64
+CACHE=yes
+PAYLOAD=$NEWPAYLOAD
+PAYLOAD_ARCH=$NEWPAYLOAD_ARCH
+
+# ARCH is the tinycore arch -- we'll do everything with i686
+ARCH="x86"
+# tar library separately
+TARLIB="false"	
+EOF
+
+chmod 755 $PREFIX/persist/tce/installer.conf
+fi
+
+source $PREFIX/persist/tce/installer.conf
+
+CURDIR=`pwd`
+SCRIPTDIR=$(cd `dirname $0`;pwd)
+# we need a record of what the scripts does, good (or bad)
+DATESTR=`date "+%y%m%d-%H"`
+LOGFILE=$CURDIR/mkstick-${DATESTR}.$$.log
+exec 2>&1
+#exec  > tee -a $LOGFILE
+
+COLOUR="yes"
+set +x
+# check that we have the needed tools
+for x in mkisofs xzcat wget gdisk syslinux grub2-install mke2fs e2label mkdosfs; do
+    which $x
+    if [ $? -ne 0 ] ; then
+        echo -e "\\0033[1;34m"
+        echo "Please install $x and run the script again"
+        echo -en "\\0033[0;39m"
+        exit 1
+    fi
+done
+set -x
+
+# verify that there is an USB drive installed
+REMOVABLE_DRIVES=""
+for _device in /sys/block/*/device; do
+    if echo $(readlink -f $_device)|egrep -q "usb"; then
+        _disk=`echo $_device | cut -f4 -d/`
+        REMOVABLE_DRIVES="$_disk"
+    fi
+done
+if [ -z $REMOVABLE_DRIVES ];then
+    echo "no usb found. Quitting"
+    exit 1
+fi
+dev="/dev/$REMOVABLE_DRIVES"
+# some distributions do automount, unmount everything
+umount /dev/$dev*
+
+# build the cache
+mkdir -p $ISO/boot/isolinux
+mkdir -p $ISO/boot/images
+mkdir -p $PERSIST/tce/optional
+mkdir -p $PERSIST/tce/shuttle
+mkdir -p $PERSIST/target/syslinux
+mkdir -p /mnt/tinycore
+
+function p_error {
+    if [ "$COLOUR" = "yes" ]; then
+        echo -e "\e[1;91m$1\e[0;39m"
+    else
+        echo "$1"
+    fi
+}
+
+function p_warning {
+    if [ "$COLOUR" = "yes" ]; then
+        echo -e "\e[1;93m$1\e[0;39m"
+    else
+        echo "$1"
+    fi
+}
+
+function p_informational {
+    if [ "$COLOUR" = "yes" ]; then
+        echo -e "\e[1;92m$1\e[0;39m"
+    else
+        echo "$1"
+    fi
+}
+
+function p_begin {
+    if [ "$COLOUR" = "yes" ]; then
+        echo -ne "\e[1;96m$1\e[0;39m"
+    else
+        echo -n "$1"
+    fi
+}
+
+function p_end {
+    if [ "$COLOUR" = "yes" ]; then
+        echo -e "\e[1;92m$1\e[0;39m"
+    else
+        echo "$1"
+    fi
+}
+
+function get_kernel {
+    cd "$ISO/boot/isolinux"
+    flags="-q -c"
+    path=$1/$2
+    file=$3
+    checksum=$file.md5.txt
+
+    if [ ! -f $file ]; then
+        p_begin "Downloading $file ... "
+        wget $flags $path/$file
+        p_end "ok"
+        return
+    fi
+
+    if [ $CACHE = no ]; then
+        p_begin "Checking if $file is up to date ... "
+        wget $flags $path/$checksum
+        if [ "$(cat $checksum | cut -f 1 -d ' ')" \
+            != "$(md5sum $file | cut -f 1 -d ' ')" ]; then
+            rm -f $file
+            p_begin "Downloading $file ... "
+            wget $flags $path/$file
+        fi
+        p_end
+        rm -f $checksum
+    fi
+}
+
+get_kernel \
+    http://repo.tinycorelinux.net/${CORE_VERSION} \
+    ${ARCH}/release/distribution_files \
+    ${CORE_INITRD_X86}.gz
+get_kernel \
+    http://repo.tinycorelinux.net/${CORE_VERSION} \
+    ${ARCH}/release/distribution_files \
+    ${CORE_KERNEL_X86}
+
+exec  > tee -a $LOGFILE
+
+    # download tiny core extension
+    cat <<EOF > $PERSIST/tce/onboot.lst
+appbrowser-cli.tcz
+avahi.tcz
+dosfstools.tcz
+dbus.tcz
+expat2.tcz
+gcc_libs.tcz
+gdisk.tcz
+glib2.tcz
+grub2.tcz
+grub2-efi.tcz
+gzip.tcz
+icu.tcz
+libdaemon.tcz
+libavahi.tcz
+libffi.tcz
+libnl.tcz
+libusb.tcz
+lighttpd.tcz
+nano.tcz
+ncurses-common.tcz
+ncurses.tcz
+ncurses-utils.tcz
+nss-mdns.tcz
+openssh.tcz
+openssl-1.0.0.tcz
+parted.tcz
+popt.tcz
+readline.tcz
+rsync.tcz
+sed.tcz
+syslinux.tcz
+tar.tcz
+usb-utils.tcz
+wget.tcz
+xz.tcz
+EOF
+
+# wait for the new file to be available
+sync
+
+p_begin "Checking Tiny Core extensions ... "
+base=http://repo.tinycorelinux.net/${CORE_VERSION}
+cd $PERSIST/tce/optional
+flags="-q -c "
+for file in $(<${PERSIST}/tce/onboot.lst); do
+    if [ ! -f $file ]; then
+        wget ${flags} ${base}/${ARCH}/tcz/$file  \
+        wget ${flags} ${base}/${ARCH}/tcz/$file.md5.txt  \
+        wget ${flags} ${base}/${ARCH}/tcz/$file.dep  \
+        p_end "got $file"
+    else
+        if [ $CACHE = no ]; then
+            rm -f $file.md5.txt
+            wget ${flags} ${base}/${ARCH}/tcz/$file.md5.txt  
+            if [ "$(cat $file.md5.txt | cut -f 1 -d ' ')" \
+                != "$(md5sum $file | cut -f 1 -d ' ')" ]; then
+                rm -f $file{,.dep}
+                wget ${flags} ${base}/${ARCH}/tcz/$file  \
+                wget ${flags} ${base}/${ARCH}/tcz/$file.dep \
+                p_end "updated $file"
+            fi
+        fi
+    fi
+done
+p_end "ok"
+
+# get the essential configuration files to /boot/isolinux
+cd $SCRIPTDIR
+cp -p isolinux.cfg $ISO/boot/isolinux
+cp -p /usr/share/syslinux/isolinux.bin $ISO/boot/isolinux
+cp -p /usr/share/syslinux/ldlinux.c32 $ISO/boot/isolinux
+cp -p /usr/share/syslinux/menu.c32 $ISO/boot/isolinux
+cp -p /usr/share/syslinux/libutil.c32 $ISO/boot/isolinux
+
+# get the persistent tinycore data to include in our package
+p_begin "Fetching the persitent Data for Tiny Core ... "
+tce_root=$PERSIST/tce/
+cd $tce_root
+if [ ! -f $PERSIST/tce/mydata.tgz ];then
+   flags="-q -c -P $tce_root"
+   wget ${flags} ${UK_URL}mydata.tgz
+else
+  if [ $CACHE = no ]; then
+    rm -f mydata.md5.txt
+    wget ${flags} ${UK_URL}mydata.md5.txt  
+    if [ "$(cat mydata.tgz.md5.txt | cut -f 1 -d ' ')" \
+        != "$(md5sum mydata.tgz | cut -f 1 -d ' ')" ]; then
+        wget ${flags} ${UK_URL}mydata.tgz
+    fi
+  fi
+fi
+# following script copies the rootfs, after configuration, back to USB stick
+cp -p $SCRIPTDIR/fetch_target $tce_root
+
+p_end "ok"
+
+# get the EFI tree from fedora
+cd $ISO/boot/images
+if [ ! -f "efiboot.img" ]; then
+        wget ${UK_URL}efiboot${FC_VER}.img
+        mv efiboot${FC_VER}.img efiboot.img
+fi
+cd $CURDIR
+
+#=================================================================================
+# now that we have all the Tiny Core stuff set up, What do we need to install XSCE
+function get_rootfs {
+    FC_ARCH=$1
+    # where to put the rootfs
+    RFS=$PERSIST/target/${FC_VER}/${FC_ARCH}
+    mkdir -p $RFS
+    flags="-q -c "
+    file=$2
+    path=${UK_URL}$file
+    if [ ! -f $RFS/$file ]; then
+        p_begin "Downloading $file ... "
+        cd $RFS     
+        if [ ! -f $file ]; then
+           wget $flags $path
+        fi
+        p_end "ok"
+    else
+	  if [ $CACHE = no ]; then
+	    rm -f ${path}.md5.txt
+	    wget ${flags} ${path}.md5.txt  
+	    # if md5 does not exist, just use what we have
+	    if [ $? -ne 0 ]; then
+		return
+	    fi
+	    if [ "$(cat ${path}.md5.txt | cut -f 1 -d ' ')" \
+		!= "$(md5sum ${path} | cut -f 1 -d ' ')" ]; then
+           	wget $flags $path
+	    fi
+	  fi
+    fi
+}
+
+exec  > tee -a $LOGFILE
+
+if [ "$PAYLOAD" == "netinst" ];then  # download an image from XSCE repository
+    if [ "$PAYLOAD_ARCH" == "i686" ]; then
+	get_rootfs i686 i686fc${FC_VER}_${PAYLOAD}.tgz
+    else
+	get_rootfs x86_64 x86_64fc${FC_VER}_${PAYLOAD}.tgz
+    fi
+fi
+
+# and the generic config files
+cd $SCRIPTDIR
+cp -p loadOS $PERSIST/target
+cp -p grub.cfg* $PERSIST/target/
+# We're assuming that efi is only x86_64 --grub.cfg.target implies x86_64
+cp -p grub.cfg.target.efi $PERSIST/target/grub.cfg.efi
+cp -p finish-install.service /$PERSIST/tce/shuttle
+cp -p xsce-after-installer /$PERSIST/tce/shuttle
+cp -p sysprep /$PERSIST/tce/shuttle
+
+#=================================================================================
+# The following stuff is necessary to create the USB stick
+
+# create the ISO
+cd "$ISO"
+STICKNAME="FC21_mbr_efi_netinst"
+#mkisofs -U -A "TinyCore" -V "TinyCore x86 Disc 1" \
+#    -volset "TinyCore x86" -J -joliet-long -r -v -T -x ./lost+found \
+#    -o ../${STICKNAME}.iso \
+#    -b boot/isolinux/isolinux.bin -c boot/isolinux/boot.cat -no-emul-boot -boot-load-size 4 \
+#    -boot-info-table -eltorito-alt-boot -e boot/images/efiboot.img -no-emul-boot .
+
+mkisofs -o ../${STICKNAME}.iso -b boot/isolinux/isolinux.bin -c boot/isolinux/boot.cat \
+	 -no-emul-boot -boot-load-size 4 -boot-info-table .
+
+# the following puts the mbr loader in place
+isohybrid ../$STICKNAME.iso --partok
+
+#=================================================================================
+read -t 10 -p "\n\nI'm about to write $dev OK [Y/n]:" ans
+case $ans in
+"y"|"Y")
+    ;;
+*)
+    if [ ! -z $ans ];then
+        exit 1
+    fi
+esac
+
+# if the non-data is cleared it might compress better
+#dd if=/dev/zero of=$dev bs=1M count=100
+#dd if=/dev/zero of=$dev bs=1M count=2500
+
+# partition the stick with a small ISO (not writeable) and then larger mounted partition
+
+#parted -s ${dev} mklabel msdos
+#partprobe $dev
+#parted -s -a cylinder ${dev} mkpart primary 8192s 54mB
+#parted -s -a cylinder ${dev} mkpart primary ext4 54mB 4gB
+
+
+sfdisk -u S $dev << EOF 
+8192,110592,83,*
+118785,8389836,83
+EOF
+
+sleep 5
+partprobe $dev
+
+# put the iso into the small partition
+cd $PREFIX
+dd if=$STICKNAME.iso of="${dev}1" bs=4M
+
+# copy a master boot record to stick
+cd $SCRIPTDIR
+dd if=/usr/share/syslinux/mbr.bin of=${dev} bs=440 count=1
+
+umount ${dev}2
+# and format the data partition
+mke2fs -t ext2 -L data "${dev}2"
+
+sync
+
+mkdir -p /tmp/data
+mount ${dev}2 /tmp/data
+# the shuttle folder is copied below tce
+cp -rp $PERSIST/tce /tmp/data
+if [ "$PAYLOAD_ARCH" == "i686" ];then
+    mkdir -p /tmp/data/target/${FC_VER}/i686
+else
+    mkdir -p /tmp/data/target/${FC_VER}/x86_64
+fi
+cp -p $PERSIST/target/loadOS /tmp/data/target
+cp -p $PERSIST/target/grub.cfg* /tmp/data/target
+
+if [ ! -z ${PAYLOAD} -a "$PAYLOAD" != "skip" ];then
+  cp -rp $PERSIST/target/${FC_VER}/${PAYLOAD_ARCH}/${PAYLOAD_ARCH}fc${FC_VER}_${PAYLOAD}.tgz /tmp/data/target/${FC_VER}/${PAYLOAD_ARCH}
+fi
+umount /tmp/data
+rmdir /tmp/data
+# vim: tabstop=4 expandtabs shiftwidth=4 softtabstop=4
