@@ -400,20 +400,22 @@ ddCopy(){
 
    # at boot, the read-only driver loads
    umount $DEST_PARTITION
-   mount -t ntfs-3g "DEST_PARTITION" "$DEST_MNT"
-   dd status=progress if="$SRC_DEVICE" of="$write_to" bs=4096 count=$WRITE_COUNT 2>progress &
+   mount -t ntfs-3g "$DEST_PARTITION" "$DEST_MNT"
+   if [ ! -e fifo ]; then
+      mkfifo fifo
+   fi
+   dd status=progress if="$SRC_DEVICE" of="$write_to" bs=4096 count=$WRITE_COUNT 2>fifo &
 
-   # now read the progress file and update the gauge
+   # now read the fifo and update the gauge
    lastcopied=
-   # debug messages upset guage
    set +x
    while true; do
       sleep 5
-      copied=`cat progress | tr '\r' '\n' | tail -n1 | awk '{print $1}'`
+      line=$(cat fifo)
+      copied=$(echo $line | awk '{print $1}')
       if [ "$copied" = "$lastcopied" ]; then break; fi
       lastcopied=$copied
       percent=$(expr $copied \* 100 / $CHOSEN_SIZE) 
-      line=`cat progress | tr '\r' '\n' | tail -n1 `
       echo XXX
       echo $percent
       echo $line
