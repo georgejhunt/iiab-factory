@@ -262,7 +262,6 @@ createFilename(){
    SRC_MNT=/mnt/$SRC_PARTITION_NIBBLE
    DEST_PARTITION_NIBBLE=${DEST:5}
    DEST_MNT=/mnt/$DEST_PARTITION_NIBBLE
-   TITLE=$(gettext "Please identify this copy")
    name=
    if [ -f /opt/name ]; then
       name=$(cat /opt/name)
@@ -271,6 +270,7 @@ createFilename(){
    if [ -f /opt/label ]; then
       label=$(cat /opt/label)
    fi
+   TITLE=$(gettext "Please identify this copy")
    MSG=$(gettext "Requires name and short identifying label")
    exec 3>&1
    DATA=$(dialog --output-separator ":" --title "$TITLE" --form "$MSG" 10 80 3 \
@@ -441,12 +441,108 @@ copySD(){
    ddCopy
 }
 
+ls_menu(){
+   # receives path as $1 and a location to write file at $2
+   declare -a lookup
+   mkdir -p $(dirname $2)
+   list=$(ls -l $1 | awk '{print $9}')
+   index=1
+   for f in $list;do
+     size=$( ls -lh $1/$f | awk '{print $5}') 
+     (printf '\"%-2s\"  \"%-9s %-20s\" \\\n' $index $size $f) >> $2 
+     lookup[$index]=$f
+     index=$(( $index + 1 ))
+   done
+   echo ${lookup[@]}
+}
+
+get_nth(){
+   index=1
+   nth=$1
+   shift
+   choice_list=$@
+   for ch in $choice_list; do
+      if [ "$index" = "$nth" ]; then break; fi 
+      index=$(( index + 1 ))
+   done
+   echo $ch
+}
+   
 makeSmaller(){
-   true
+   cat << EOF > /tmp/choice/smaller
+   PAGE_TITLE=$(gettext "\"Choose Image to make Smaller\"")
+   MENU_TITLE=$(gettext "\"Must have unused space to be of much use\"")
+   CHOICE=\$(dialog --title "\$PAGE_TITLE" --clear --ok-label "Select"  \\
+    --menu "\$MENU_TITLE" 20 90 25    \\
+EOF
+   image_list=$(ls_menu /mnt/sda1 /tmp/choice/smaller)
+   echo  3\>\&1 1\>\&2 2\>\&3\) >> /tmp/choice/smaller
+
+   # choose the image to minify
+   source /tmp/choice/smaller
+   if test $? -ne 0; then return 99; fi
+
+   # trim the string
+   CHOICE=$(echo $CHOICE | awk '{print $1}')
+   image_path=/mnt/sda1/$(get_nth $CHOICE $image_list )
+
+   # get the proposed new size
+   new_size=$(min_device_size $image_path)
+   human=$(bytesToHuman $new_size)
+   current_size=$(ls -lh $image_path | awk '{print $5}')
+   
+   TITLE=$(gettext "OK to proceed?")
+   MSG=$(gettext "The image file $image_path is currently $current_size. \n
+It's new size will be $human. Do you want to proceed?")
+   
+   dialog --title "$TITLE" --yesno "$MSG" 6 80
+   if test $? -ne 0; then return 99; fi
+
+   size_image $image_path
+   return 99 
+}
+
+deleteImage(){
+   cat << EOF > /tmp/choice/smaller
+   PAGE_TITLE=$(gettext "\"Choose Image to make Smaller\"")
+   MENU_TITLE=$(gettext "\"Must have unused space to be of much use\"")
+   CHOICE=\$(dialog --title "\$PAGE_TITLE" --clear --ok-label "Select"  \\
+    --menu "\$MENU_TITLE" 20 90 25    \\
+EOF
+   image_list=$(ls_menu /mnt/sda1 /tmp/choice/smaller)
+   echo  3\>\&1 1\>\&2 2\>\&3\) >> /tmp/choice/smaller
+
+   # choose the image to minify
+   source /tmp/choice/smaller
+   if test $? -ne 0; then return 99; fi
+
+   # trim the string
+   CHOICE=$(echo $CHOICE | awk '{print $1}')
+   image_path=/mnt/sda1/$(get_nth $CHOICE $image_list )
+
+   # get the proposed new size
+   new_size=$(min_device_size $image_path)
+   human=$(bytesToHuman $new_size)
+   current_size=$(ls -lh $image_path | awk '{print $5}')
+   
+   TITLE=$(gettext "OK to proceed?")
+   MSG=$(gettext "The image file $image_path is about to be deleted. \
+Do you want to proceed?")
+   
+   dialog --title "$TITLE" --yesno "$MSG" 6 80
+   if test $? -ne 0; then return 99; fi
+
+   rm -f $image_path
+   return 99 
 }
 
 image2SD(){
-   true
+   PAGE_TITLE=$(gettext "Select Source Image")
+   MENU_TITLE=$(gettext "Choose hard disk image to Copy to SD card")
+   choice_list=$(ls_menu /mnt/sda1 /tmp/choice/minify)
+   CHOICE=$(dialog --title "\$PAGE_TITLE" --ok-label "Select"  \
+ --menu "\$MENU_TITLE" 20 90 5 $choice_list \   
+   3>&1 1>&2 2>&3)
 }
 #######################   Main Menu   ###############################
 mainMenu(){
@@ -473,6 +569,8 @@ mainMenu(){
       smaller) makeSmaller
          ;;
       image2sd) image2SD
+         ;;
+      delete) deleteImage
          ;;
       terminal)
          clear
