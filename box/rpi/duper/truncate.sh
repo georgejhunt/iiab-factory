@@ -2,6 +2,8 @@
 # Functions useful to manipulate SD card content
 # All sizes in bytes, unless otherwise noted
 
+# number of partitions on IIAB may change
+LIBRARY_PARTITION=2
 if [ -f /etc/iiab/iiab.env ]; then
    source /etc/iiab/iiab.env
 else
@@ -10,42 +12,48 @@ else
 fi
 
 min_device_size(){
-   # Params:  in: last partition -- echos out: bytes
+   # Params:  in: full path of file containing image (2 partitions)
+   #  -- echos out: bytes
 
-   PARTITION=$1
-   PART_DIGIT=${PARTITION: (-1)}
-
-   # get the device associated with this partition
-   if [ ${PARTITION:0:11} = "/dev/mmcblk" ]; then
-      DEVICE=${PARTITION:0:12}
-   else
-      DEVICE=${PARTITION:0:-1}
+   # get the next loop device
+   DEVICEREF=$(losetup -f)
+   $(losetup -P $DEVICEREF $1)
+   if [ $? -ne 0 ];then
+      echo failed to create RAWDEVICE reference for $1
+      losetup -d $DEVICEREF
+      exit 1
    fi
+   PARTITION=${DEVICEREF}p${LIBRARY_PARTITION}
 
-   PART_START_SECTOR=`parted -sm  $DEVICE unit s print|awk -F':' -v part=$PART_DIGIT  '{if($1 == part)print $2;}'`
+   PART_START_SECTOR=`parted -sm  $DEVICEREF unit s print|awk -F':' -v part=$LIBRARY_PARTITION  '{if($1 == part)print $2;}'`
    root_start=${PART_START_SECTOR:0:-1}
 
    umount $PARTITION
    e2fsck -fy $PARTITION > /dev/null
    block4k=`resize2fs -M -P $PARTITION | cut -d" " -f7`
+   e2fsck -fy $PARTITION > /dev/null
    echo $(expr $block4k \* 4096 + $root_start \* 512)
+   # clean up
+   losetup -d $DEVICEREF
 }
 
-truncate(){
-   # truncate partition
-   # param1: partition (example /dev/sdb2)
-   # param2: desired size in 4kblocks (smallest possible if not specified)
+size_image(){
+   # truncate last partition
+   # param1: full path of the file containing IIAB image
+   # param2 (optional): desired size in 4kblocks (smallest possible if not specified)
    # returns 0 on success
 
-   PARTITION=$1
-   if [ ${PARTITION:0:11} = "/dev/mmcblk" ]; then
-      DEVICE=${PARTITION:0:12}
-   else
-      DEVICE=${PARTITION:0:-1}
+   # get the next loop device
+   DEVICEREF=$(losetup -f)
+   $(losetup -P $DEVICEREF $1)
+   if [ $? -ne 0 ];then
+      echo failed to create RAWDEVICE reference for $1
+      losetup -d $DEVICEREF
+      exit 1
    fi
-   PART_DIGIT=${PARTITION: (-1)}
+   PARTITION=${DEVICEREF}p${LIBRARY_PARTITION}
 
-   PART_START_SECTOR=`parted -sm  $DEVICE unit s print|awk -v part="$PART_DIGIT" -F ":" '{if($1 == part)print $2;}'`
+   PART_START_SECTOR=`parted -sm  $DEVICEREF unit s print|awk -v part="$LIBRARY_PARTITION" -F ":" '{if($1 == part)print $2;}'`
    root_start=${PART_START_SECTOR:0: -1}
 
    # total prior sectors is 1 less than start of this one
@@ -54,12 +62,18 @@ truncate(){
    # resize root file system
    umount $PARTITION
    e2fsck -fy $PARTITION > /dev/null
-   if test $? -ne 0; then exit 1; fi
+   if test $? -ne 0; then 
+      losetup -d $DEVICEREF
+      exit 1
+   fi
    if [ $# -lt 2 ]; then
      block4k=`resize2fs -P $PARTITION | cut -d" " -f7`
+     block4k=$( echo "$block4k + 1 + $prior_sectors / 8 " | bc)
    else
-     block4k=$2
+     block4k=$(echo "$2 / 4096 " | bc )
    fi
+
+   # do the real work of this function
    resize2fs $PARTITION $block4k
 
    umount $PARTITION
@@ -68,17 +82,31 @@ truncate(){
    # fetch the new size of ROOT PARTITION
    blocks4k=`e2fsck -n $PARTITION 2>/dev/null|grep blocks|cut -f5 -d" "|cut -d/ -f2`
 
-   root_end=$(( (blocks4k * 8) + prior_sectors ))
+   root_end=$( echo "$blocks4k * 8 + $prior_sectors" | bc )
 
    umount $PARTITION
    e2fsck -fy $PARTITION > /dev/null
 
    # resize root partition
-   parted -s $DEVICE rm $PART_DIGIT
-   parted -s $DEVICE unit s mkpart primary ext4 $root_start $root_end
+   parted -s $DEVICEREF rm $LIBRARY_PARTITION
+   parted -s $DEVICEREF unit s mkpart primary ext4 $root_start $root_end
 
-   umount $PARTITION
+   mount $PARTITION
+   losetup -d $DEVICEREF
    exit 0
+}
+
+ptable(){
+   # parameter is filename of image
+   DEVICEREF=$(losetup -f)
+   $(losetup -P $DEVICEREF $1)
+   if [ $? -ne 0 ];then
+      echo failed to create RAWDEVICE reference for $1
+      losetup -d $DEVICEREF
+      exit 1
+   fi
+   fdisk  -l $DEVICEREF
+   losetup -d $DEVICEREF
 }
 iiab_label(){
    if [ $# -ne 3 ];then

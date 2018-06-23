@@ -1,4 +1,8 @@
 #!/bin/bash -x
+if [ id -u = "0" ]; then
+   echo This script should be run as user tc
+   exit 1
+fi
 tce-load -wi dosfstools e2fsprogs
 
 efi=sdc2
@@ -78,7 +82,8 @@ sudo cp iiab.lst /mnt/$ext/tce/
 sudo cp /mnt/sdb2/tce/mydata.tgz /mnt/$ext/tce/mydata.tgz
 sudo cp -r /mnt/sdb2/opt /mnt/$ext/
 sudo cp -f load.sh /mnt/$ext/tce
-
-pushd /mnt/$ext/opt/iiab
-   sudo git clone https://github.com/iiab/iiab-factory
-popd
+if [ ! -d /mnt/$ext/opt/iiab/iiab-factory ]; then
+   pushd /mnt/$ext/opt/iiab
+      sudo git clone https://github.com/iiab/iiab-factory
+   popd
+fi

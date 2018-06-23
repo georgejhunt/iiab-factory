@@ -53,6 +53,7 @@ wifi.tcz
 wl-modules-4.14.10-tinycore.tcz
 iw.tcz
 pci-utils.tcz
+e2fsprogs.tcz
 firmware-atheros.tcz
 firmware-broadcom_bcm43xx.tcz
 firmware-broadcom_bnx2.tcz
