@@ -1,5 +1,11 @@
 #!/bin/bash -x
-if [ id -u = "0" ]; then
+# Create a USB stick to double boot in 32bit and 64bit tiny core linux
+# For the purpose of duplicating rpi SD cards on a windows laptop
+
+#Copyright George Hunt @ georgejhunt@gmail.com
+# attributioon James Camron http://dev.laptop.org/git/users/quozl/mktinycorexo/
+
+if [ $(id -u) = "0" ]; then
    echo This script should be run as user tc
    exit 1
 fi
