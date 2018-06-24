@@ -54,7 +54,7 @@ done
 
 initDevicesList() {
   typeset -a devices
-  mapfile -t devices < <(lsblk -o NAME,TYPE | grep --color=never -oP '^\K\w+(?=\s+disk$)')
+  mapfile -t devices < <(lsblk -o NAME,TYPE | grep  -oP '^\K\w+(?=\s+disk$)')
   for device in "${devices[@]}" ; do
     if [ "$(getDeviceType "/dev/$device")" == "usb" ] || [ "$disableUSBCheck" == 'true' ]; then
       devicesList+=("$device")
@@ -99,10 +99,10 @@ checkSudo() {
 
 ################  Choose Source  ###################
 selectSource(){
-   echo > /tmp/devices
-   df -hT | grep mnt | grep -v -e Disk -e sdb | sort >> /tmp/devices
+   echo > /tmp/duper/devices
+   df -hT | grep mnt | grep -v -e Disk -e sdb | sort >> /tmp/duper/devices
 
-   cat << EOF > /tmp/src
+   cat << EOF > /tmp/duper/src
 MENU_TITLE=$(gettext "\"Choose Source -- Probably a mmcblk device of type ext4 \n\n\n \\
 device            type        size      used       free     %       mounted to\n \\
 =================================================================================\"")
@@ -113,9 +113,9 @@ EOF
    while read line
    do
     awk ' { printf("\"%-16s\"  \"%-5s %10s %10s %10s %6s    %-15s\"  \\\n",$1,$2,$3,$4,$5,$6,$7);}'
-   done < /tmp/devices >> /tmp/src
-   echo  3\>\&1 1\>\&2 2\>\&3\) >> /tmp/src
-   source /tmp/src
+   done < /tmp/duper/devices >> /tmp/duper/src
+   echo  3\>\&1 1\>\&2 2\>\&3\) >> /tmp/duper/src
+   source /tmp/duper/src
    if test $? -ne 0 ; then return 99; fi
    SRC_PARTITION=$(echo $SRC | awk '{print $1}')
    SRC_DEVICE=${SRC_PARTITION:0:(-2)}
@@ -144,10 +144,10 @@ getSourceMinSize(){
 selectDestination(){
    # the source should not be listed as a potential destination
    ignore=${SRC:0:9}
-   echo > /tmp/devices1
-   df -hT | grep mnt | grep -v -e Disk -e sdb -e $ignore| sort >> /tmp/devices1
+   echo > /tmp/duper/devices1
+   df -hT | grep mnt | grep -v -e Disk -e sdb -e $ignore| sort >> /tmp/duper/devices1
 
-   cat << EOF > /tmp/dest
+   cat << EOF > /tmp/duper/dest
       PAGE_TITLE=$(gettext "\"Choose Destination\"")
       MENU_TITLE=$(gettext "\"Choose Destination -- Either hard disk of type ntfs, or another SD Card \n \\
       \$MIN_SIZE_TEXT  \n\n\n \\
@@ -160,9 +160,9 @@ EOF
    while read line
    do
     awk ' { printf("\"%-16s\"  \"%-5s %10s %10s %10s %6s    %-15s\"  \\\n",$1,$2,$3,$4,$5,$6,$7);}'
-   done < /tmp/devices1 >> /tmp/dest
-   echo  3\>\&1 1\>\&2 2\>\&3\) >> /tmp/dest
-   source /tmp/dest
+   done < /tmp/duper/devices1 >> /tmp/duper/dest
+   echo  3\>\&1 1\>\&2 2\>\&3\) >> /tmp/duper/dest
+   source /tmp/duper/dest
    if test $? -ne 0 ; then return 99; fi
    DEST=$(echo "$DEST" | awk '{print $1;}')    # trim trailing spaces
    # currently, the decision on whether destination is a SD card is based upon "mmcblk"
@@ -286,7 +286,7 @@ createFilename(){
    echo $LABEL > /opt/label
    echo $NAME > /opt/name
    iiab_label $SRC_PARTITION $NAME $LABEL
-   TARGET=$DEST_MNT/$(cat /tmp/identifier_filename)
+   TARGET=$DEST_MNT/$(cat /tmp/duper/identifier_filename)
    echo $TARGET > /opt/lapdup_filename
    return 0
 }
@@ -470,16 +470,16 @@ get_nth(){
 }
 
 selectImage(){
-   local PAGE_TITLE=$1
-   local MENU_MSG=$2  
-   cat << EOF > /tmp/choice/images
+   local TMP_FILE=$1
+   local PARTITION=$2
+   cat << EOF > "$TMP_FILE"
    CHOICE=\$(dialog --title "\$PAGE_TITLE" --clear --ok-label "Select"  \\
     --menu "\$MENU_MSG" 20 90 25    \\
 EOF
-   image_list=$(ls_menu /mnt/sda1 /tmp/choice/images)
-   echo  3\>\&1 1\>\&2 2\>\&3\) >> /tmp/choice/images
+   image_list=$(ls_menu $PARTITION $TMP_FILE)
+   echo  3\>\&1 1\>\&2 2\>\&3\) >> $TMP_FILE
 
-   source /tmp/choice/image
+   source "$TMP_FILE"
    if test $? -ne 0; then return 99; fi
 
    # trim the string
@@ -488,11 +488,13 @@ EOF
 }
 
 makeSmaller(){
-   cat << EOF > /tmp/choice/smaller
+   TMP_FILE=/tmp/duper/smaller
+   PART=/mnt/sda1
+   cat << EOF > "$TMP_FILE"
    TITLE=$(gettext "\"Choose Image to make Smaller\"")
    MSG=$(gettext "\"Must have unused space to be of much use\"")
 EOF
-   image_path=$(selectImage($TITLE $MSG))
+   image_path=$(selectImage  $TMP_FILE $PART)
 
    # get the proposed new size
    new_size=$(min_device_size $image_path)
@@ -511,11 +513,13 @@ It's new size will be $human. Do you want to proceed?")
 }
 
 deleteImage(){
-   cat << EOF > /tmp/choice/smaller
-   TITLE=$(gettext "\"Choose Image to make Smaller\"")
-   MSG=$(gettext "\"Must have unused space to be of much use\"")
+   TMP_FILE=/tmp/duper/delete
+   PART=/mnt/sda1
+   cat << EOF > $TMP_FILE
+   TITLE=$(gettext "\"Choose a File to Delete\"")
+   MSG=$(gettext "\"Highlight the file you wish to delete\"")
 EOF
-   image_path=$(selectImage($TITLE $MSG))
+   image_path=$(selectImage  $TMP_FILE $PART)
    if test $? -ne 0; then return 99; fi
 
    TITLE=$(gettext "OK to proceed?")
@@ -530,12 +534,15 @@ Do you want to proceed?")
 }
 
 image2SD(){
-   PAGE_TITLE=$(gettext "Select Source Image")
-   MENU_TITLE=$(gettext "Choose hard disk image to Copy to SD card")
-   choice_list=$(ls_menu /mnt/sda1 /tmp/choice/minify)
-   CHOICE=$(dialog --title "\$PAGE_TITLE" --ok-label "Select"  \
- --menu "\$MENU_TITLE" 20 90 5 $choice_list \   
-   3>&1 1>&2 2>&3)
+   TMP_FILE=/tmp/duper/copy2sd
+   PART=/mnt/sda1
+   cat << EOF > "$TMP_FILE"
+   TITLE=$(gettext "Select Source Image")
+   MSG=$(gettext "Choose hard disk image to Copy to SD card")
+EOF
+   image_path=$(selectImage  $TMP_FILE $PART)
+   if test $? -ne 0; then return 99; fi
+
 }
 
 #######################   Main Menu   ###############################
