@@ -12,6 +12,7 @@ source truncate.sh
 #############   Set up variables ############
 #  All size variables kept in bytes
 export TEXTDOMAIN=piconf
+typeset -a devicesList
 
 
 # i18n stuff
@@ -52,19 +53,8 @@ while (( $# )) ; do
     esac
 done
 
-initDevicesList() {
-  typeset -a devices
-  mapfile -t devices < <(lsblk -o NAME,TYPE | grep  -oP '^\K\w+(?=\s+disk$)')
-  for device in "${devices[@]}" ; do
-    if [ "$(getDeviceType "/dev/$device")" == "usb" ] || [ "$disableUSBCheck" == 'true' ]; then
-      devicesList+=("$device")
-    fi
-  done
-}
 
 initialize(){
-   typeset -a devicesList
-   initDevicesList
    prefix=/usr/local
    exec_prefix=${prefix}
    bindir=${exec_prefix}/bin
@@ -181,21 +171,14 @@ EOF
    fi
 }
 
-# Given a device like /dev/sdd
-# Return 0 if device is USB, 1 otherwise
-getDeviceType() {
-  typeset deviceName=/sys/block/${1#/dev/}
-  typeset deviceType=$(udevadm info --query=property --path="$deviceName" | grep -Po 'ID_BUS=\K\w+')
-  echo "$deviceType"
+isUSB() {
+  #typeset deviceName=/sys/block/${1#/dev/}
+  udevadm info --query=symlink --name="$1" | grep usb
 }
 
 assertDeviceIsUSB() {
    typeset deviceType
    dest_is_usb=
-   if [ "$disableUSBCheck" == 'true' ]; then
-      echowarn "USB check has been disabled. Skipping."
-      return 0
-   fi
    deviceType=$(getDeviceType "$selectedDevice")
    if [ "$deviceType" != "usb" ]  ; then
       msg=$(gettext "The device you selected is not connected through USB (found BUS: \`$deviceType'.\
@@ -584,6 +567,8 @@ mainMenu(){
 }
 
 cleanup(){
+   echo devicesList: ${devicesList[*]}
+   echo "usbList: ${usbList[@]}"
    umount /mnt/$SRC_DEVICE
    if [ "$dest_is_usb" = "true" ]; then
       umount "$DEST_DEVICE"
@@ -592,6 +577,7 @@ cleanup(){
 
 main(){
    initialize "$@"
+   echo $devicesList
    checkSudo "$@"
    while true; do
       mainMenu
@@ -599,5 +585,21 @@ main(){
 }
 
 trap cleanup EXIT INT TERM
+
+# initDevicesList() {
+declare -a devicesList 
+declare -a usbList 
+declare -a devices
+ mapfile -t devices < <(lsblk -o NAME,TYPE | grep  disk | awk '{print $1}')
+echo ${devices[@]}
+for device in "${devices[@]}" ; do
+   isUSB "/dev/$device"
+   if [ $? -eq 0 ]; then
+      usbList+=("$device")
+   fi
+   devicesList+=("$device")
+done
+
+
 
 main "$@"
