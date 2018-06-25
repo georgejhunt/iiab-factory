@@ -56,8 +56,7 @@ done
 getDevicesList() {
    declare -a devices 
    # pass the arrays by reerence
-   local -n usbList=$1
-   local -n devicesList=$2
+   local -n devicesList=$1
    mapfile -t devices < <(lsblk -o NAME,TYPE | grep  disk | awk '{print $1}')
    echo ${devices[@]}
    for device in "${devices[@]}" ; do
@@ -480,6 +479,30 @@ EOF
    if test $? -ne 0; then return 99; fi
 }
 
+selectDevice(){
+   local TMP_FILE=$1
+   local -n devicesList=$2
+   TARGET=\$(dialog --title "\$TITLE" --clear --ok-label "Select"  \\
+   for d in ${devicesList]}; do
+      size=$(lsblk -o SIZE,TYPE /dev/$d | grep disk | awk '{print $1}')
+     (printf '\"%-16  2s\"  \" %-20s\" \\\n' $d $size $f) >> $1 
+   done
+   source $1
+   if test $? -ne 0; then return 99; fi
+   echo $TARGET
+}
+selectTarget(){
+   declare -a devicesList
+   getDevicesList $devicesList
+   TMP_FILE=/tmp/duper/target
+   cat << EOF > "$TMP_FILE"
+   TITLE=$(gettext "\"Choose Target\"")
+   MSG=$(gettext "\"Use care that you do not select the SD card you are copyig from.\"")
+EOF
+   targetDevice=$(selectDevice  $TMP_FILE $devicesList)
+   if test $? -ne 0; then return 99; fi
+
+}
 ################   Top Level Action Routines   ####################
 copySD(){
    selectSource
@@ -521,7 +544,7 @@ It's new size will be $human. Do you want to proceed?")
 }
 
 image2SD(){
-   selectFile
+   selectFile   # source returned in CHOICE
    selectTarget
    willItFit
    doDdCopy
@@ -590,8 +613,6 @@ cleanup(){
    if [ $? -eq 99 ]; then
       main
    fi
-   echo devicesList: ${devicesList[*]}
-   echo "usbList: ${usbList[@]}"
    umount /mnt/$SRC_DEVICE
    if [ "$dest_is_usb" = "true" ]; then
       umount "$DEST_DEVICE"
