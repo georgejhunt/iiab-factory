@@ -593,6 +593,8 @@ declare -a devices
  mapfile -t devices < <(lsblk -o NAME,TYPE | grep  disk | awk '{print $1}')
 echo ${devices[@]}
 for device in "${devices[@]}" ; do
+   if [ "$device" = "sdb" ]; then continue; fi
+   if [ "$device" = "zram0" ]; then continue; fi
    isUSB "/dev/$device"
    if [ $? -eq 0 ]; then
       usbList+=("$device")
