@@ -53,6 +53,23 @@ while (( $# )) ; do
     esac
 done
 
+getDevicesList() {
+   declare -a devices 
+   # pass the arrays by reerence
+   local -n usbList=$1
+   local -n devicesList=$2
+   mapfile -t devices < <(lsblk -o NAME,TYPE | grep  disk | awk '{print $1}')
+   echo ${devices[@]}
+   for device in "${devices[@]}" ; do
+      if [ "$device" = "sdb" ]; then continue; fi
+      if [ "$device" = "zram0" ]; then continue; fi
+      isUSB "/dev/$device"
+      if [ $? -eq 0 ]; then
+         usbList+=("$device")
+      fi
+      devicesList+=("$device")
+   done
+}
 
 initialize(){
    prefix=/usr/local
@@ -139,7 +156,7 @@ selectDestination(){
 
    cat << EOF > /tmp/duper/dest
       PAGE_TITLE=$(gettext "\"Choose Destination\"")
-      MENU_TITLE=$(gettext "\"Choose Destination -- Either hard disk of type ntfs, or another SD Card \n \\
+      MENU_TITLE=$(gettext "\"Choose Destination -- Either hard disk partition of type ntfs, or another SD Card \n \\
       \$MIN_SIZE_TEXT  \n\n\n \\
       device            type        size      used       free     %       mounted to\n \\
    =================================================================================\"")
@@ -406,24 +423,6 @@ ddCopy(){
       echo XXX 
    done | dialog --title "Image writing" --gauge "Burning the image on the SD card..." 10 78 0
 }
-copySD(){
-   selectSource
-   if [ $? -eq 99  ]; then return 99;  fi
-   verifySourceNotBoot
-   if [ $? -eq 99  ]; then return 99;  fi
-   selectDestination
-   if [ $? -eq 99  ]; then return 99;  fi
-   if [  "$dest_is_file" = "true" ]; then
-      createFilename
-   else
-      assertDeviceIsUSB
-   fi
-   willItFit
-   if [ $? -eq 99  ]; then return 99;  fi
-   finalVerification
-   if [ $? -eq 99  ]; then return 99;  fi
-   ddCopy
-}
 
 ls_menu(){
    # receives path as $1 and a location to write file at $2
@@ -470,6 +469,32 @@ EOF
    echo /mnt/sda1/$(get_nth $CHOICE $image_list )
 }
 
+selectFile(){
+   TMP_FILE=/tmp/duper/copy2sd
+   PART=/mnt/sda1
+   cat << EOF > "$TMP_FILE"
+   TITLE=$(gettext "Select Source Image")
+   MSG=$(gettext "Choose hard disk image to Copy to SD card")
+EOF
+   image_path=$(selectImage  $TMP_FILE $PART)
+   if test $? -ne 0; then return 99; fi
+}
+
+################   Top Level Action Routines   ####################
+copySD(){
+   selectSource
+   verifySourceNotBoot
+   selectDestination
+   if [  "$dest_is_file" = "true" ]; then
+      createFilename
+   else
+      assertDeviceIsUSB
+   fi
+   willItFit
+   finalVerification
+   ddCopy
+}
+
 makeSmaller(){
    TMP_FILE=/tmp/duper/smaller
    PART=/mnt/sda1
@@ -495,6 +520,13 @@ It's new size will be $human. Do you want to proceed?")
    return 99 
 }
 
+image2SD(){
+   selectFile
+   selectTarget
+   willItFit
+   doDdCopy
+}
+
 deleteImage(){
    TMP_FILE=/tmp/duper/delete
    PART=/mnt/sda1
@@ -514,18 +546,6 @@ Do you want to proceed?")
 
    rm -f $image_path
    return 99 
-}
-
-image2SD(){
-   TMP_FILE=/tmp/duper/copy2sd
-   PART=/mnt/sda1
-   cat << EOF > "$TMP_FILE"
-   TITLE=$(gettext "Select Source Image")
-   MSG=$(gettext "Choose hard disk image to Copy to SD card")
-EOF
-   image_path=$(selectImage  $TMP_FILE $PART)
-   if test $? -ne 0; then return 99; fi
-
 }
 
 #######################   Main Menu   ###############################
@@ -567,6 +587,9 @@ mainMenu(){
 }
 
 cleanup(){
+   if [ $? -eq 99 ]; then
+      main
+   fi
    echo devicesList: ${devicesList[*]}
    echo "usbList: ${usbList[@]}"
    umount /mnt/$SRC_DEVICE
@@ -576,9 +599,6 @@ cleanup(){
 }
 
 main(){
-   initialize "$@"
-   echo $devicesList
-   checkSudo "$@"
    while true; do
       mainMenu
    done
@@ -586,22 +606,7 @@ main(){
 
 trap cleanup EXIT INT TERM
 
-# initDevicesList() {
-declare -a devicesList 
-declare -a usbList 
-declare -a devices
- mapfile -t devices < <(lsblk -o NAME,TYPE | grep  disk | awk '{print $1}')
-echo ${devices[@]}
-for device in "${devices[@]}" ; do
-   if [ "$device" = "sdb" ]; then continue; fi
-   if [ "$device" = "zram0" ]; then continue; fi
-   isUSB "/dev/$device"
-   if [ $? -eq 0 ]; then
-      usbList+=("$device")
-   fi
-   devicesList+=("$device")
-done
-
-
+initialize "$@"
+checkSudo "$@"
 
 main "$@"
