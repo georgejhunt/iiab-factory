@@ -482,51 +482,23 @@ EOF
    if test $? -ne 0; then return 99; fi
 }
 
-selectDevice(){
-   local TMP_FILE=$1
-   local -n devicesList=$2
-   cat "\$(dialog --title \$TITLE --ok-label Select" >> $TMP_FiLE
-   for d in ${devicesList[@]}; do
-      size=$(lsblk -o SIZE,TYPE /dev/$d | grep disk | awk '{print $1}')
-     (printf '\"%-16  2s\"  \" %-20s\" \\\n' $d $size $f) >> $TMP_FILE 
-   done
-   source $TMP_FiLE
-   if test $? -ne 0; then return 99; fi
-   echo $TARGET
-}
-selectTarget(){
-   declare -a devicesList
-   getDevicesList $devicesList
-   TMP_FILE=/tmp/duper/target
-   cat << EOF > "$TMP_FILE"
-   TITLE=$(gettext "\"Choose Target\"")
-   MSG=$(gettext "\"Use care that you do not select the SD card you are copyig from.\"")
-EOF
-   targetDevice=$(selectDevice  $TMP_FILE $devicesList)
-   if test $? -ne 0; then return 99; fi
-
 selectSDDevice(){
-   TMP_FILE=/tmp/duper/sddest
+   TMP_FILE=/tmp/duper/sddevice
    echo > $TMP_FILE
+   lsblk -o NAME,SIZE,TYPE  | grep disk | grep -v -e sdb -e sda -e zram0 | sort > /tmp/duper/scratch
    cat << EOF > $TMP_FILE
-      TITLE=$(gettext "\"Choose Destination\"")
-      MSG=$(gettext "\"Choose Destination -- Either hard disk partition of type ntfs, or another SD Card \n \\
-      \$MIN_SIZE_TEXT  \n\n\n \\
-      device            type        size      used       free     %       mounted to\n \\
+      TITLE=$(gettext "\"Choose SD card as Destination\"")
+      MSG=$(gettext "\"Use care that you do not select the SD card you are copying from. \n\n\n \\
+      device            size        mounted to\n \\
    =================================================================================\"")
-EOF
-   df -hT | grep mnt | grep -v -e Disk -e sdb -e $ignore| sort > /tmp/duper/devices1
-   local TMP_FILE=$1
-   cat << EOF > $TMP_FILE
-      DEST=\$(dialog --title "\$TITLE" --clear --ok-label "Select" --default-item "/dev/mmcblk0p2  " \\
+      DEST=\$(dialog --title "\$TITLE" --clear --ok-label "Select" 22  " \\
        --menu "\$MSG" 20 90 25    \\
 EOF
-
    while read line
    do
-    awk ' { printf("\"%-16s\"  \"%-5s %10s %10s %10s %6s    %-15s\"  \\\n",$1,$2,$3,$4,$5,$6,$7);}'
-   done < /tmp/duper/scratch >> $TMP_FIlE
-   echo  3\>\&1 1\>\&2 2\>\&3\) >> $TMP_FILE
+      echo $line | awk ' { printf("\"%-16s\"  \"s %-10s \"  \\\n",$1,$2);}'
+   done < /tmp/duper/scratch >> "$TMP_FIlE"
+   echo  3\>\&1 1\>\&2 2\>\&3\) >> "$TMP_FILE"
    source $TMP_FILE
    if test $? -ne 0 ; then return 99; fi
 }
@@ -572,7 +544,7 @@ It's new size will be $human. Do you want to proceed?")
 
 image2SD(){
    selectFile   # source returned in CHOICE
-   selectSDDestination
+   selectSDDevice
    willItFit
    doDdCopy
 }
