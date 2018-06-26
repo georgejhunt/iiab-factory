@@ -15,10 +15,18 @@ export TEXTDOMAIN=piconf
 declare SRC_DEVICE=/dev/mmcblk0
 declare SRC_DEVICE_SIZE
 declare SRC_PARTITION=/dev/mmcblk0p2
+declare SRC_FILE_SIZE
 declare DEST_DEVICE=/dev/sda
 declare DEST_DEVICE_SIZE
 declare DEST_PARTITION=/dev/sda1
 declare DEST_PARTITION_SIZE
+##############   Inputs to shared functions  ##########
+declare WILLITFIT_SRC
+declare WILLITFIT_SRC_SPEC
+declare WILLITFIT_DEST
+declare WILLITFIT_DEST_SPEC
+declare DD_SRC
+declare DD_DEST
 
 # i18n stuff
 if test "$USE_NLS" = "yes" && type -p gettext > /dev/null; then
@@ -326,15 +334,11 @@ verifySourceNotBoot(){
 
 # Check that a dd copy of source will fit on destination
 willItFit(){
-   if [ "$dest_is_file" != "true" ]; then
-      output_size="$DEST_SIZE"
-   else
-      output_size="$DEST_FREE"
-   fi
-   if [ $(expr "$CHOSEN_SIZE" \> "$output_size") -eq 1 ] ; then
-     msg=$(gettext "The source $SRC_PARTITION ($CHOSEN_SIZE) will not fit on the destination $DEST_PARTITION" ($output_size))
-     title=$(gettext "Fatal ERROR . . . Quitting")
-     dialog --title "$title"  --msgbox "$msg" 10 70 
+   if [ $(expr "$WILLITFIT_SRC" \> "$WILLITFIT_DEST") -eq 1 ] ; then
+     MSG=$(gettext "The source $WILLITFIT_SRC_SPEC ($bytesToHuman($WILLITFIT_SRC_SIZE)) \
+  will not fit on the destination $WILLITFIT_DEST_SPEC" ($(bytesToHuman($WILLITFIT_DEST_SIZE))))
+     TITLE=$(gettext "Fatal ERROR . . . Quitting")
+     dialog --title "$TITLE"  --msgbox "$MSG" 10 70 
      return 99 
    fi
    return 0
@@ -349,8 +353,7 @@ save (){
      title=$(gettext "Proceed with resizing Source to $human? \
      Both Source and Destination will be set to expand upon reboot")
      dialog --title "$title"  --yesno "$msg" 10 70 
-     if test $? -ne 0 ; then return 99; fi
-   fi
+     if test $? -ne 0 ; then return 99; fi fi
 }
 #####################  Confirm Choices     ###########################
 optionalTruncation(){
@@ -480,32 +483,36 @@ selectFile(){
 EOF
    image_path=$(selectImage  $TMP_FILE $PART)
    if test $? -ne 0; then return 99; fi
+   SRC_FILE_SIZE=$(df -l $image_path | awk '{print $5}')
+   WILITFIT_SRC=$SRC_FILE_SIZE
 }
 
 selectSDDevice(){
-   TMP_FILE=/tmp/duper/sddevice
-   echo > $TMP_FILE
+   echo > /tmp/duper/sddevice
    lsblk -o NAME,SIZE,TYPE  | grep disk | grep -v -e sdb -e sda -e zram0 | sort > /tmp/duper/scratch
-   cat << EOF > $TMP_FILE
-      TITLE=$(gettext "\"Choose SD card as Destination\"")
-      MSG=$(gettext "\"Use care that you do not select the SD card you are copying from. \n\n\n \\
-      device            size        mounted to\n \\
-   =================================================================================\"")
-      DEST=\$(dialog --title "\$TITLE" --clear --ok-label "Select" 22  " \\
-       --menu "\$MSG" 20 90 25    \\
+   cat << EOF > /tmp/duper/sddevice
+TITLE=\$(gettext "\"Choose SD card as Destination\"")
+MSG=\$(gettext "\"Use care that you do not select the SD card you are copying from. \n\n\n \\
+device            size        mounted to\n \\
+=================================================================================\"")
+DEST=\$(dialog --title "\$TITLE" --clear --ok-label "Select"  \\
+ --menu "\$MSG" 20 90 25    \\
 EOF
-   while read line
-   do
-      echo $line | awk ' { printf("\"%-16s\"  \"s %-10s \"  \\\n",$1,$2);}'
-   done < /tmp/duper/scratch >> "$TMP_FIlE"
-   echo  3\>\&1 1\>\&2 2\>\&3\) >> "$TMP_FILE"
-   source $TMP_FILE
+   awk '{ printf("\"%-16s\"  \" %-10s\"  \\\n",$1,$2);}' /tmp/duper/scratch >> /tmp/duper/sddevice
+   echo  3\>\&1 1\>\&2 2\>\&3\) >> /tmp/duper/sddevice
+   source /tmp/duper/sddevice
    if test $? -ne 0 ; then return 99; fi
+   DEST_DEVICE=/dev/$(echo $DEST | awk '{print $1}')
+   DEST_SIZE=$(fdisk -l $DEST_DEVICE | grep Disk | cut -d" " -f 5)
+   WILLITFIT_DEST=$DEST_SIZE
 }
+
 ################   Top Level Action Routines   ####################
 copySD(){
    selectSource
+   if [ $? = 99 ];then return 99; fi
    verifySourceNotBoot
+   if [ $? = 99 ];then return 99; fi
    selectDestination
    if [  "$dest_is_file" = "true" ]; then
       createFilename
@@ -513,6 +520,7 @@ copySD(){
       assertDeviceIsUSB
    fi
    willItFit
+   if [ $? = 99 ];then return 99; fi
    finalVerification
    #ddCopy
 }
@@ -544,8 +552,11 @@ It's new size will be $human. Do you want to proceed?")
 
 image2SD(){
    selectFile   # source returned in CHOICE
+   if [ $? = 99 ];then return 99; fi
    selectSDDevice
+   if [ $? = 99 ];then return 99; fi
    willItFit
+   if [ $? = 99 ];then return 99; fi
    doDdCopy
 }
 
