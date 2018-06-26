@@ -12,8 +12,13 @@ source truncate.sh
 #############   Set up variables ############
 #  All size variables kept in bytes
 export TEXTDOMAIN=piconf
-typeset -a devicesList
-
+declare SRC_DEVICE=/dev/mmcblk0
+declare SRC_DEVICE_SIZE
+declare SRC_PARTITION=/dev/mmcblk0p2
+declare DEST_DEVICE=/dev/sda
+declare DEST_DEVICE_SIZE
+declare DEST_PARTITION=/dev/sda1
+declare DEST_PARTITION_SIZE
 
 # i18n stuff
 if test "$USE_NLS" = "yes" && type -p gettext > /dev/null; then
@@ -55,17 +60,13 @@ done
 
 getDevicesList() {
    declare -a devices 
-   # pass the arrays by reerence
+   # pass the array by reerence
    local -n devicesList=$1
    mapfile -t devices < <(lsblk -o NAME,TYPE | grep  disk | awk '{print $1}')
    echo ${devices[@]}
    for device in "${devices[@]}" ; do
       if [ "$device" = "sdb" ]; then continue; fi
       if [ "$device" = "zram0" ]; then continue; fi
-      isUSB "/dev/$device"
-      if [ $? -eq 0 ]; then
-         usbList+=("$device")
-      fi
       devicesList+=("$device")
    done
 }
@@ -75,8 +76,6 @@ initialize(){
    exec_prefix=${prefix}
    bindir=${exec_prefix}/bin
    sbindir=${exec_prefix}/sbin
-   SRC_DEVICE=/dev/mmcblk0
-   SRC_PARTITION=/dev/mmcblk0p2
    DUPVERSION=0.1
    USE_NLS=no
    # mount all the partitions so that df can return usage
@@ -109,11 +108,11 @@ selectSource(){
    df -hT | grep mnt | grep -v -e Disk -e sdb | sort >> /tmp/duper/devices
 
    cat << EOF > /tmp/duper/src
-MENU_TITLE=$(gettext "\"Choose Source -- Probably a mmcblk device of type ext4 \n\n\n \\
+MSG=$(gettext "\"Choose Source -- Probably a mmcblk device of type ext4 \n\n\n \\
 device            type        size      used       free     %       mounted to\n \\
 =================================================================================\"")
-SRC=\$(dialog --title "\$PAGE_TITLE" --ok-label "Select" --default-item "/dev/mmcblk0p2  " \\
- --menu "\$MENU_TITLE" 20 90 5    \\
+SRC=\$(dialog --title "\$TITLE" --ok-label "Select" --default-item "/dev/mmcblk0p2  " \\
+ --menu "\$MSG" 20 90 5    \\
 EOF
 
    while read line
@@ -147,18 +146,22 @@ getSourceMinSize(){
 }
 
 ################  Choose Destination  ###################
+
 selectDestination(){
    # the source should not be listed as a potential destination
    ignore=${SRC:0:9}
-   echo > /tmp/duper/devices1
-   df -hT | grep mnt | grep -v -e Disk -e sdb -e $ignore| sort >> /tmp/duper/devices1
-
-   cat << EOF > /tmp/duper/dest
+   TMP_FILE=/tmp/duper/dest
+   echo > $TMP_FILE
+   cat << EOF > $TMP_FILE
       PAGE_TITLE=$(gettext "\"Choose Destination\"")
       MENU_TITLE=$(gettext "\"Choose Destination -- Either hard disk partition of type ntfs, or another SD Card \n \\
       \$MIN_SIZE_TEXT  \n\n\n \\
       device            type        size      used       free     %       mounted to\n \\
    =================================================================================\"")
+EOF
+   df -hT | grep mnt | grep -v -e Disk -e sdb -e $ignore| sort >> /tmp/duper/devices1
+   local TMP_FILE=$1
+   cat << EOF > $TMP_FILE
       DEST=\$(dialog --title "\$PAGE_TITLE" --clear --ok-label "Select" --default-item "/dev/mmcblk0p2  " \\
        --menu "\$MENU_TITLE" 20 90 25    \\
 EOF
@@ -482,12 +485,12 @@ EOF
 selectDevice(){
    local TMP_FILE=$1
    local -n devicesList=$2
-   TARGET=\$(dialog --title "\$TITLE" --clear --ok-label "Select"  \\
-   for d in ${devicesList]}; do
+   cat "\$(dialog --title \$TITLE --ok-label Select" >> $TMP_FiLE
+   for d in ${devicesList[@]}; do
       size=$(lsblk -o SIZE,TYPE /dev/$d | grep disk | awk '{print $1}')
-     (printf '\"%-16  2s\"  \" %-20s\" \\\n' $d $size $f) >> $1 
+     (printf '\"%-16  2s\"  \" %-20s\" \\\n' $d $size $f) >> $TMP_FILE 
    done
-   source $1
+   source $TMP_FiLE
    if test $? -ne 0; then return 99; fi
    echo $TARGET
 }
@@ -502,6 +505,30 @@ EOF
    targetDevice=$(selectDevice  $TMP_FILE $devicesList)
    if test $? -ne 0; then return 99; fi
 
+selectSDDevice(){
+   TMP_FILE=/tmp/duper/sddest
+   echo > $TMP_FILE
+   cat << EOF > $TMP_FILE
+      TITLE=$(gettext "\"Choose Destination\"")
+      MSG=$(gettext "\"Choose Destination -- Either hard disk partition of type ntfs, or another SD Card \n \\
+      \$MIN_SIZE_TEXT  \n\n\n \\
+      device            type        size      used       free     %       mounted to\n \\
+   =================================================================================\"")
+EOF
+   df -hT | grep mnt | grep -v -e Disk -e sdb -e $ignore| sort > /tmp/duper/devices1
+   local TMP_FILE=$1
+   cat << EOF > $TMP_FILE
+      DEST=\$(dialog --title "\$TITLE" --clear --ok-label "Select" --default-item "/dev/mmcblk0p2  " \\
+       --menu "\$MSG" 20 90 25    \\
+EOF
+
+   while read line
+   do
+    awk ' { printf("\"%-16s\"  \"%-5s %10s %10s %10s %6s    %-15s\"  \\\n",$1,$2,$3,$4,$5,$6,$7);}'
+   done < /tmp/duper/scratch >> $TMP_FIlE
+   echo  3\>\&1 1\>\&2 2\>\&3\) >> $TMP_FILE
+   source $TMP_FILE
+   if test $? -ne 0 ; then return 99; fi
 }
 ################   Top Level Action Routines   ####################
 copySD(){
@@ -515,7 +542,7 @@ copySD(){
    fi
    willItFit
    finalVerification
-   ddCopy
+   #ddCopy
 }
 
 makeSmaller(){
@@ -545,7 +572,7 @@ It's new size will be $human. Do you want to proceed?")
 
 image2SD(){
    selectFile   # source returned in CHOICE
-   selectTarget
+   selectSDDestination
    willItFit
    doDdCopy
 }
