@@ -116,24 +116,28 @@ checkSudo() {
 
 ################  Choose Source  ###################
 selectSource(){
-   echo > /tmp/duper/devices
-   df -hT | grep mnt | grep -v -e Disk -e sdb | sort >> /tmp/duper/devices
-
+   declare -a deviceList
+   echo > /tmp/duper/src
    cat << EOF > /tmp/duper/src
+TITLE=$(gettext "\"CHOOSE SOURCE SD CARD\"")
 MSG=$(gettext "\"Choose Source -- Probably a mmcblk device of type ext4 \n\n\n \\
 device            type        size      used       free     %       mounted to\n \\
 =================================================================================\"")
 SRC=\$(dialog --title "\$TITLE" --ok-label "Select" --default-item "/dev/mmcblk0p2  " \\
  --menu "\$MSG" 20 90 5    \\
 EOF
-   ls -l $LAPTOP_MOUNT/iiab | grep -v  -e $TINY_CORE_DEVICE | sort | \
-      awk ' { printf("\"%-16s\"  \"%-5s %10s %10s %10s %6s    %-15s\"  \\\n",$9,$5,$6,$7,$8);}' | \
-         >> /tmp/duper/src
-   df -hT | grep -v -e Disk -e $LAPTOP_DEVICE -e TINY_CORE_DEVICE | sort \
-      awk ' { printf("\"%-16s\"  \"%-5s %10s %10s %10s %6s    %-15s\"  \\\n",$1,$2,$3,$4,$5,$6,$7);}' | \
-         >> /tmp/duper/src
-   echo  3\>\&1 1\>\&2 2\>\&3\) >> /tmp/duper/src
+   devices=$(getDevicesList $deficelist)
+   (for d in $devices; do
+      if [ "$d" = "$LAPTOP_DEVICE" ]; then continue; fi
+      if [ "$d" = "$TINY_CORE_DEVICE" ]; then continue; fi
+      if [ "$d" = "zram0" ]; then continue; fi
+      size=$(fdisk -l /dev/$d | grep Disk | grep /dev/$dd | awk '{print $3}')
+      units=$(fdisk -l /dev/$d | grep Disk | grep /dev/$dd | awk '{print $4}')
+      echo "$d $size $units" | awk '{printf("\"%-10s \"    \"%-6s %-6s\" \\\n",$1,$2,$3)}'
+   done ) >> /tmp/duper/src
+   echo  "3>&1 1>&2 2>&3)" >> /tmp/duper/src
    source /tmp/duper/src
+   exit 1
    if test $? -ne 0 ; then return 99; fi
    SRC_PARTITION=$(echo $SRC | awk '{print $1}')
    SRC_DEVICE=${SRC_PARTITION:0:(-2)}
@@ -193,9 +197,12 @@ selectDestination(){
        --menu "\$MSG" 20 90 25    \\
 EOF
 
+   ls -l $LAPTOP_MOUNT/iiab |  \
+      awk '{ printf("\"%-16s\"  \" %10s s\"  \\\n",$9,$5);}' | \
+         tee -a /tmp/duper/copyto
    df -hT | grep Disk | grep -v -e $LAPTOP_DEVICE -e $TINY_CORE_DEVICE | sort | \
       awk ' { printf("\"%-16s\"  \"%-5s %10s %10s %10s %6s    %-15s\"  \\\n",$1,$2,$3,$4,$5,$6,$7);}' | \
-         >> /tmp/duper/copyto
+         tee -a /tmp/duper/copyto
    echo  3\>\&1 1\>\&2 2\>\&3\) >> /tmp/duper/copyto
    source /tmp/duper/copyto
    if test $? -ne 0 ; then return 99; fi
