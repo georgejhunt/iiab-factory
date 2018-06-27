@@ -20,6 +20,9 @@ declare DEST_DEVICE=/dev/sda
 declare DEST_DEVICE_SIZE
 declare DEST_PARTITION=/dev/sda1
 declare DEST_PARTITION_SIZE
+declare LAPTOP_DEVICE=sda
+declare LAPTOP_MOUNT=/mnt/sda1
+declare TINY_CORE_DEVICE=sdb       # the Tiny Core Linux boot device
 ##############   Inputs to shared functions  ##########
 declare WILLITFIT_SRC
 declare WILLITFIT_SRC_SPEC
@@ -38,7 +41,7 @@ else
     echo "$*"
   }
   gettext() {
-    echo -n "$*"
+     echo -n "$*"
   }
 fi
 xmsg() {
@@ -95,6 +98,7 @@ initialize(){
    done
    erase_block=8192   # size in sectors
    export TERM=xterm
+   mkdir -p /tmp/duper
 }
 
 checkSudo() {
@@ -122,11 +126,12 @@ device            type        size      used       free     %       mounted to\n
 SRC=\$(dialog --title "\$TITLE" --ok-label "Select" --default-item "/dev/mmcblk0p2  " \\
  --menu "\$MSG" 20 90 5    \\
 EOF
-
-   while read line
-   do
-    awk ' { printf("\"%-16s\"  \"%-5s %10s %10s %10s %6s    %-15s\"  \\\n",$1,$2,$3,$4,$5,$6,$7);}'
-   done < /tmp/duper/devices >> /tmp/duper/src
+   ls -l $LAPTOP_MOUNT/iiab | grep -v  -e $TINY_CORE_DEVICE | sort | \
+      awk ' { printf("\"%-16s\"  \"%-5s %10s %10s %10s %6s    %-15s\"  \\\n",$9,$5,$6,$7,$8);}' | \
+         >> /tmp/duper/src
+   df -hT | grep -v -e Disk -e $LAPTOP_DEVICE -e TINY_CORE_DEVICE | sort \
+      awk ' { printf("\"%-16s\"  \"%-5s %10s %10s %10s %6s    %-15s\"  \\\n",$1,$2,$3,$4,$5,$6,$7);}' | \
+         >> /tmp/duper/src
    echo  3\>\&1 1\>\&2 2\>\&3\) >> /tmp/duper/src
    source /tmp/duper/src
    if test $? -ne 0 ; then return 99; fi
@@ -154,32 +159,45 @@ getSourceMinSize(){
 }
 
 ################  Choose Destination  ###################
+selectSDDestination(){
+   echo > /tmp/duper/sddevice
+   lsblk -o NAME,SIZE,TYPE  | grep disk | grep -v -e sdb -e sda -e zram0 | sort > /tmp/duper/scratch
+   cat << EOF > /tmp/duper/sddevice
+TITLE=\$(gettext "\"Choose SD card as Destination\"")
+MSG=\$(gettext "\"Use care that you do not select the SD card you are copying from. \n\n\n \\
+device            size        mounted to\n \\
+=================================================================================\"")
+DEST=\$(dialog --title "\$TITLE" --clear --ok-label "Select"  \\
+ --menu "\$MSG" 20 90 25    \\
+EOF
+   awk '{ printf("\"%-16s\"  \" %-10s\"  \\\n",$1,$2);}' /tmp/duper/scratch >> /tmp/duper/sddevice
+   echo  3\>\&1 1\>\&2 2\>\&3\) >> /tmp/duper/sddevice
+   source /tmp/duper/sddevice
+   if test $? -ne 0 ; then return 99; fi
+   DEST_DEVICE=/dev/$(echo $DEST | awk '{print $1}')
+   DEST_SIZE=$(fdisk -l $DEST_DEVICE | grep Disk | cut -d" " -f 5)
+   WILLITFIT_DEST=$DEST_SIZE
+}
 
 selectDestination(){
    # the source should not be listed as a potential destination
    ignore=${SRC:0:9}
-   TMP_FILE=/tmp/duper/dest
-   echo > $TMP_FILE
-   cat << EOF > $TMP_FILE
-      PAGE_TITLE=$(gettext "\"Choose Destination\"")
-      MENU_TITLE=$(gettext "\"Choose Destination -- Either hard disk partition of type ntfs, or another SD Card \n \\
+   echo > /tmp/duper/copyto
+   cat << EOF > /tmp/duper/copyto
+      TITLE=$(gettext "\"Choose Destination\"")
+      MSG=$(gettext "\"Choose Destination -- Either hard disk partition of type ntfs, or another SD Card \n \\
       \$MIN_SIZE_TEXT  \n\n\n \\
       device            type        size      used       free     %       mounted to\n \\
    =================================================================================\"")
-EOF
-   df -hT | grep mnt | grep -v -e Disk -e sdb -e $ignore| sort >> /tmp/duper/devices1
-   local TMP_FILE=$1
-   cat << EOF > $TMP_FILE
-      DEST=\$(dialog --title "\$PAGE_TITLE" --clear --ok-label "Select" --default-item "/dev/mmcblk0p2  " \\
-       --menu "\$MENU_TITLE" 20 90 25    \\
+      DEST=\$(dialog --title "\$TITLE" --clear --ok-label "Select" --default-item "/dev/mmcblk0p2  " \\
+       --menu "\$MSG" 20 90 25    \\
 EOF
 
-   while read line
-   do
-    awk ' { printf("\"%-16s\"  \"%-5s %10s %10s %10s %6s    %-15s\"  \\\n",$1,$2,$3,$4,$5,$6,$7);}'
-   done < /tmp/duper/devices1 >> /tmp/duper/dest
-   echo  3\>\&1 1\>\&2 2\>\&3\) >> /tmp/duper/dest
-   source /tmp/duper/dest
+   df -hT | grep Disk | grep -v -e $LAPTOP_DEVICE -e $TINY_CORE_DEVICE | sort | \
+      awk ' { printf("\"%-16s\"  \"%-5s %10s %10s %10s %6s    %-15s\"  \\\n",$1,$2,$3,$4,$5,$6,$7);}' | \
+         >> /tmp/duper/copyto
+   echo  3\>\&1 1\>\&2 2\>\&3\) >> /tmp/duper/copyto
+   source /tmp/duper/copyto
    if test $? -ne 0 ; then return 99; fi
    DEST=$(echo "$DEST" | awk '{print $1;}')    # trim trailing spaces
    # currently, the decision on whether destination is a SD card is based upon "mmcblk"
@@ -410,7 +428,7 @@ ddCopy(){
    if [ ! -e fifo ]; then
       mkfifo fifo
    fi
-   dd status=progress if="$SRC_DEVICE" of="$write_to" bs=4096 count=$WRITE_COUNT 2>fifo &
+   # dd status=progress if="$SRC_DEVICE" of="$write_to" bs=4096 count=$WRITE_COUNT 2>fifo &
 
    # now read the fifo and update the gauge
    lastcopied=
@@ -429,21 +447,6 @@ ddCopy(){
    done | dialog --title "Image writing" --gauge "Burning the image on the SD card..." 10 78 0
 }
 
-ls_menu(){
-   # receives path as $1 and a location to write file at $2
-   declare -a lookup
-   mkdir -p $(dirname $2)
-   list=$(ls -l $1 | awk '{print $9}')
-   index=1
-   for f in $list;do
-     size=$( ls -lh $1/$f | awk '{print $5}') 
-     (printf '\"%-2s\"  \"%-9s %-20s\" \\\n' $index $size $f) >> $2 
-     lookup[$index]=$f
-     index=$(( $index + 1 ))
-   done
-   echo ${lookup[@]}
-}
-
 get_nth(){
    index=1
    nth=$1
@@ -457,13 +460,23 @@ get_nth(){
 }
 
 selectImage(){
-   local TMP_FILE=$1
-   local PARTITION=$2
+   local PART_MOUNT=$1
+   local TMP_FILE=$2
+   declare -a lookup
+   mkdir -p $(dirname $2)
    cat << EOF > "$TMP_FILE"
-   CHOICE=\$(dialog --title "\$PAGE_TITLE" --clear --ok-label "Select"  \\
-    --menu "\$MENU_MSG" 20 90 25    \\
+   CHOICE=\$(dialog --title "\$TITLE" --clear --ok-label "Select"  \\
+    --menu "\$MSG" 20 90 25    \\
 EOF
-   image_list=$(ls_menu $PARTITION $TMP_FILE)
+   list=$(ls -l $1 | awk '{print $9}')
+   index=1
+   for f in $list;do
+     size=$( ls -lh $1/$f | awk '{print $5}') 
+     (printf '\"%-2s\"  \"%-9s %-20s\" \\\n' $index $size $f) >> $2 
+     lookup[$index]=$f
+     index=$(( $index + 1 ))
+   done
+   image_list=${lookup[@]}
    echo  3\>\&1 1\>\&2 2\>\&3\) >> $TMP_FILE
 
    source "$TMP_FILE"
@@ -471,23 +484,23 @@ EOF
 
    # trim the string
    CHOICE=$(echo $CHOICE | awk '{print $1}')
-   echo /mnt/sda1/$(get_nth $CHOICE $image_list )
+   echo $DEST_PARTITION/iiab/$(get_nth $CHOICE $image_list )
 }
 
 selectFile(){
    TMP_FILE=/tmp/duper/copy2sd
-   PART=/mnt/sda1
+   PART=$DEST_PARTITION
    cat << EOF > "$TMP_FILE"
    TITLE=$(gettext "Select Source Image")
    MSG=$(gettext "Choose hard disk image to Copy to SD card")
 EOF
-   image_path=$(selectImage  $TMP_FILE $PART)
+   image_path=$(selectImage $PART/iiab $TMP_FILE )
    if test $? -ne 0; then return 99; fi
    SRC_FILE_SIZE=$(df -l $image_path | awk '{print $5}')
    WILITFIT_SRC=$SRC_FILE_SIZE
 }
 
-selectSDDevice(){
+selectSDDestination(){
    echo > /tmp/duper/sddevice
    lsblk -o NAME,SIZE,TYPE  | grep disk | grep -v -e sdb -e sda -e zram0 | sort > /tmp/duper/scratch
    cat << EOF > /tmp/duper/sddevice
@@ -511,8 +524,6 @@ EOF
 copySD(){
    selectSource
    if [ $? = 99 ];then return 99; fi
-   verifySourceNotBoot
-   if [ $? = 99 ];then return 99; fi
    selectDestination
    if [  "$dest_is_file" = "true" ]; then
       createFilename
@@ -527,12 +538,12 @@ copySD(){
 
 makeSmaller(){
    TMP_FILE=/tmp/duper/smaller
-   PART=/mnt/sda1
+   PART=$DEST_PARTITION
    cat << EOF > "$TMP_FILE"
    TITLE=$(gettext "\"Choose Image to make Smaller\"")
    MSG=$(gettext "\"Must have unused space to be of much use\"")
 EOF
-   image_path=$(selectImage  $TMP_FILE $PART)
+   image_path=$(selectImage  $PART/iiab $TMP_FILE )
 
    # get the proposed new size
    new_size=$(min_device_size $image_path)
@@ -553,21 +564,22 @@ It's new size will be $human. Do you want to proceed?")
 image2SD(){
    selectFile   # source returned in CHOICE
    if [ $? = 99 ];then return 99; fi
-   selectSDDevice
+   selectSDDestination
    if [ $? = 99 ];then return 99; fi
    willItFit
    if [ $? = 99 ];then return 99; fi
-   doDdCopy
+   # doDdCopy
 }
 
 deleteImage(){
    TMP_FILE=/tmp/duper/delete
-   PART=/mnt/sda1
+   PART_MOUNT=$DEST_PARTITION
+   PART=$DEST_PARTiTION
    cat << EOF > $TMP_FILE
    TITLE=$(gettext "\"Choose a File to Delete\"")
    MSG=$(gettext "\"Highlight the file you wish to delete\"")
 EOF
-   image_path=$(selectImage  $TMP_FILE $PART)
+   image_path=$(selectImage  $PART_MOUNT/iiab $TMP_FILE )
    if test $? -ne 0; then return 99; fi
 
    TITLE=$(gettext "OK to proceed?")
@@ -577,6 +589,9 @@ Do you want to proceed?")
    dialog --title "$TITLE" --yesno "$MSG" 6 80
    if test $? -ne 0; then return 99; fi
 
+   # at boot, the read-only driver loads
+   umount $PART_MOUNT
+   mount -t ntfs-3g "$PART" "$DEST_MNT"
    rm -f $image_path
    return 99 
 }
