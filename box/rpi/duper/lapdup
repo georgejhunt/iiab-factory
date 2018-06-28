@@ -26,7 +26,7 @@ declare TINY_CORE_DEVICE=sdb       # the Tiny Core Linux boot device
 ##############   Inputs to shared functions  ##########
 declare WILLITFIT_SRC
 declare WILLITFIT_SRC_SPEC
-declare WILLITFIT_DEST
+declare WILLITFIT_DEST_SIZE
 declare WILLITFIT_DEST_SPEC
 declare DD_SRC
 declare DD_DEST
@@ -120,13 +120,13 @@ selectSource(){
    echo > /tmp/duper/src
    cat << EOF > /tmp/duper/src
 TITLE=$(gettext "\"CHOOSE SOURCE SD CARD\"")
-MSG=$(gettext "\"Choose Source -- Probably a mmcblk device of type ext4 \n\n\n \\
+MSG=$(gettext "\"Choose Source -- Probably a mmcblk device \n\n\n \\
 device            type        size      used       free     %       mounted to\n \\
 =================================================================================\"")
-SRC=\$(dialog --title "\$TITLE" --ok-label "Select" --default-item "/dev/mmcblk0p2  " \\
+SRC=\$(dialog --title "\$TITLE" --ok-label "Select" --default-item "mmcblk0    " \\
  --menu "\$MSG" 20 90 5    \\
 EOF
-   devices=$(getDevicesList $deficelist)
+   devices=$(getDevicesList $deviceList)
    (for d in $devices; do
       if [ "$d" = "$LAPTOP_DEVICE" ]; then continue; fi
       if [ "$d" = "$TINY_CORE_DEVICE" ]; then continue; fi
@@ -137,10 +137,9 @@ EOF
    done ) >> /tmp/duper/src
    echo  "3>&1 1>&2 2>&3)" >> /tmp/duper/src
    source /tmp/duper/src
-   exit 1
    if test $? -ne 0 ; then return 99; fi
-   SRC_PARTITION=$(echo $SRC | awk '{print $1}')
-   SRC_DEVICE=${SRC_PARTITION:0:(-2)}
+   SRC_NIBBLE=$(echo $SRC | awk '{print $1}')
+   SRC_DEVICE=/dev/$SRC_NIBBLE
    echo $SRC
    SRC_SIZE=$(fdisk -l $SRC_DEVICE | grep Linux | awk '{print $4;}')
    SRC_SIZE=$(expr $SRC_SIZE \* 512)
@@ -165,7 +164,6 @@ getSourceMinSize(){
 ################  Choose Destination  ###################
 selectSDDestination(){
    echo > /tmp/duper/sddevice
-   lsblk -o NAME,SIZE,TYPE  | grep disk | grep -v -e sdb -e sda -e zram0 | sort > /tmp/duper/scratch
    cat << EOF > /tmp/duper/sddevice
 TITLE=\$(gettext "\"Choose SD card as Destination\"")
 MSG=\$(gettext "\"Use care that you do not select the SD card you are copying from. \n\n\n \\
@@ -174,18 +172,20 @@ device            size        mounted to\n \\
 DEST=\$(dialog --title "\$TITLE" --clear --ok-label "Select"  \\
  --menu "\$MSG" 20 90 25    \\
 EOF
-   awk '{ printf("\"%-16s\"  \" %-10s\"  \\\n",$1,$2);}' /tmp/duper/scratch >> /tmp/duper/sddevice
+   (lsblk -o NAME,SIZE,TYPE  | grep disk | grep -v -e sdb -e sda -e zram0 | sort > /tmp/duper/scratch
+   awk '{ printf("\"%-16s\"  \" %-10s\"  \\\n",$1,$2);}' ) >> /tmp/duper/sddevice
    echo  3\>\&1 1\>\&2 2\>\&3\) >> /tmp/duper/sddevice
    source /tmp/duper/sddevice
    if test $? -ne 0 ; then return 99; fi
-   DEST_DEVICE=/dev/$(echo $DEST | awk '{print $1}')
+   DEST_NIBBLE=$(echo $DEST | awk '{print $1}')
+   DEST_DEVICE=/dev/$DEST_NIBBLE
    DEST_SIZE=$(fdisk -l $DEST_DEVICE | grep Disk | cut -d" " -f 5)
-   WILLITFIT_DEST=$DEST_SIZE
+   WILLITFIT_DEST_SIZE=$DEST_SIZE
 }
 
 selectDestination(){
+   declare -a deviceList
    # the source should not be listed as a potential destination
-   ignore=${SRC:0:9}
    echo > /tmp/duper/copyto
    cat << EOF > /tmp/duper/copyto
       TITLE=$(gettext "\"Choose Destination\"")
@@ -193,10 +193,46 @@ selectDestination(){
       \$MIN_SIZE_TEXT  \n\n\n \\
       device            type        size      used       free     %       mounted to\n \\
    =================================================================================\"")
-      DEST=\$(dialog --title "\$TITLE" --clear --ok-label "Select" --default-item "/dev/mmcblk0p2  " \\
+      DEST=\$(dialog --title "\$TITLE" --clear --ok-label "Select"  \\
        --menu "\$MSG" 20 90 25    \\
 EOF
 
+   devices=$(getDevicesList $deviceList)
+   (for d in $devices; do
+      if [ "$d" = "$SRC_DEVICE" ]; then continue; fi
+      if [ "$d" = "$TINY_CORE_DEVICE" ]; then continue; fi
+      if [ "$d" = "zram0" ]; then continue; fi
+      if [ "$d" = "$SRC_NIBBLE" ]; then continue; fi
+      size=$(fdisk -l /dev/$d | grep Disk | grep /dev/$dd | awk '{print $3}')
+      units=$(fdisk -l /dev/$d | grep Disk | grep /dev/$dd | awk '{print $4}')
+      echo "$d $size $units" | awk '{printf("\"%-10s \"    \"%-6s %-6s\" \\\n",$1,$2,$3)}'
+   done ) >> /tmp/duper/copyto
+   echo  "3>&1 1>&2 2>&3)" >> /tmp/duper/copyto
+   source /tmp/duper/copyto
+   if test $? -ne 0 ; then return 99; fi
+   DEST=$(echo "$DEST" | awk '{print $1;}')    # trim trailing spaces
+   # currently, the decision on whether destination is a SD card is based upon "mmcblk"
+   dest_nibble=$(echo $DEST | awk '{print $1}')
+   echo $DEST_SIZE
+   dest_is_file=
+   echo $DEST_DEVICE | grep $LAPTOP_DEVICE > /dev/null
+   if [ $? -eq 0 ];then
+      dest_is_file=true
+      DEST_DEVICE=/dev/$dest_nibble
+      # pick the partition
+      DEST_PARTITION=$(selectPartition $DEST_DEVICE)
+      if [ $? -ne 0 ]; then return 99; fi
+      # trim the response
+      DEST_PARTITiON=$(echo $DEST_PARTITION | awk '{print $1}')
+      DEST_FREE=$(/usr/local/bin/df  | grep $DEST_PARTITION | awk '{print $4}')
+      # coreutils tce make the above work - really required for dd progress
+   #   DEST_FREE=$(/bin/df  | grep $DEST_PARTITION | awk '{print $4}')
+      DEST_FREE=$(expr "$DEST_FREE" \* 1024)
+      DEST_SIZE=$(fdisk -l $DEST_DEVICE | grep Disk | cut -d" " -f 5)
+   fi
+}
+
+junk(){
    ls -l $LAPTOP_MOUNT/iiab |  \
       awk '{ printf("\"%-16s\"  \" %10s s\"  \\\n",$9,$5);}' | \
          tee -a /tmp/duper/copyto
@@ -204,25 +240,7 @@ EOF
       awk ' { printf("\"%-16s\"  \"%-5s %10s %10s %10s %6s    %-15s\"  \\\n",$1,$2,$3,$4,$5,$6,$7);}' | \
          tee -a /tmp/duper/copyto
    echo  3\>\&1 1\>\&2 2\>\&3\) >> /tmp/duper/copyto
-   source /tmp/duper/copyto
-   if test $? -ne 0 ; then return 99; fi
-   DEST=$(echo "$DEST" | awk '{print $1;}')    # trim trailing spaces
-   # currently, the decision on whether destination is a SD card is based upon "mmcblk"
-   DEST_PARTITION=$(echo $DEST | awk '{print $1}')
-   DEST_DEVICE=${DEST_PARTITION:0:(-1)}
-   DEST_FREE=$(/usr/local/bin/df  | grep $DEST_PARTITION | awk '{print $4}')
-   # coreutils tce make the above work - really required for dd progress
-#   DEST_FREE=$(/bin/df  | grep $DEST_PARTITION | awk '{print $4}')
-   DEST_FREE=$(expr "$DEST_FREE" \* 1024)
-   DEST_SIZE=$(fdisk -l $DEST_DEVICE | grep Disk | cut -d" " -f 5)
-   echo $DEST_SIZE
-   dest_is_file=
-   echo $DEST_DEVICE | grep sda > /dev/null
-   if [ $? -eq 0 ];then
-      dest_is_file=true
-   fi
 }
-
 isUSB() {
   #typeset deviceName=/sys/block/${1#/dev/}
   udevadm info --query=symlink --name="$1" | grep usb
@@ -357,9 +375,9 @@ verifySourceNotBoot(){
    return 0
 }
 
-# Check that a dd copy of source will fit on destination
+# verify that the copy of source will fit on destination
 willItFit(){
-   if [ $(expr "$WILLITFIT_SRC" \> "$WILLITFIT_DEST") -eq 1 ] ; then
+   if [ $(expr "$WILLITFIT_SRC_SIZE" \> "$WILLITFIT_DEST_SIZE") -eq 1 ] ; then
      MSG=$(gettext "The source $WILLITFIT_SRC_SPEC ($bytesToHuman($WILLITFIT_SRC_SIZE)) \
   will not fit on the destination $WILLITFIT_DEST_SPEC" ($(bytesToHuman($WILLITFIT_DEST_SIZE))))
      TITLE=$(gettext "Fatal ERROR . . . Quitting")
@@ -466,6 +484,21 @@ get_nth(){
    echo $ch
 }
 
+selectPartition(){
+   local device=$1
+   cat << EOF > /tmp/duper/partition
+   TITLE=$(gettext "Select Destination Partition")
+   MSG=$(gettext "Probably should pick the ntfs partition with the most free space")
+   PARTITION=\$(dialog --title "\$TITLE" --clear --ok-label "Select"  \\
+       --menu "\$MSG" 20 90 25    \\
+EOF
+   (df -hT | grep $device | \
+      awk ' { printf("\"%-16s\"  \"%-5s %10s %10s %10s %6s    %-15s\"  \\\n",$1,$2,$3,$4,$5,$6,$7);}' ) \
+      >> /tmp/duper/partition
+   echo  "3>&1 1>&2 2>&3)" >> /tmp/duper/partition
+   source /tmp/duper/partition
+}
+
 selectImage(){
    local PART_MOUNT=$1
    local TMP_FILE=$2
@@ -496,7 +529,7 @@ EOF
 
 selectFile(){
    TMP_FILE=/tmp/duper/copy2sd
-   PART=$DEST_PARTITION
+   PART=$LAPTOP_MOUNT
    cat << EOF > "$TMP_FILE"
    TITLE=$(gettext "Select Source Image")
    MSG=$(gettext "Choose hard disk image to Copy to SD card")
@@ -524,7 +557,7 @@ EOF
    if test $? -ne 0 ; then return 99; fi
    DEST_DEVICE=/dev/$(echo $DEST | awk '{print $1}')
    DEST_SIZE=$(fdisk -l $DEST_DEVICE | grep Disk | cut -d" " -f 5)
-   WILLITFIT_DEST=$DEST_SIZE
+   WILLITFIT_DEST_SIZE=$DEST_SIZE
 }
 
 ################   Top Level Action Routines   ####################
@@ -545,7 +578,7 @@ copySD(){
 
 makeSmaller(){
    TMP_FILE=/tmp/duper/smaller
-   PART=$DEST_PARTITION
+   PART="$LAPTOP_MOUNT"
    cat << EOF > "$TMP_FILE"
    TITLE=$(gettext "\"Choose Image to make Smaller\"")
    MSG=$(gettext "\"Must have unused space to be of much use\"")
