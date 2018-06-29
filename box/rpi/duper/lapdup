@@ -13,7 +13,7 @@ source truncate.sh
 #  All size variables kept in bytes
 export TEXTDOMAIN=piconf
 declare SRC_DEVICE=/dev/mmcblk0
-declare SRC_DEVICE_SIZE
+declare SRC_DEVICE_HOLDS
 declare SRC_PARTITION=/dev/mmcblk0p2
 declare SRC_PARTITIONED_SIZE       # total bytes specified in partition table
 declare SRC_FILE_SIZE
@@ -137,15 +137,17 @@ EOF
       echo "$d $size $units" | awk '{printf("\"%-10s \"    \"%-6s %-6s\" \\\n",$1,$2,$3)}'
    done ) >> /tmp/duper/src
    echo  "3>&1 1>&2 2>&3)" >> /tmp/duper/src
+   echo "echo \$SRC" >> /tmp/duper/src
    SRC=$(source /tmp/duper/src)
    if test $? -ne 0 ; then 
       error_msg = $SRC
       exit 99
    fi
-   SRC_NIBBLE=$(echo $SRC | awk '{print $1}')
+   SRC_NIBBLE=$(echo "$SRC" | awk '{print $1}')
    SRC_DEVICE=/dev/$SRC_NIBBLE
+   SRC_DEVICE_HOLDS=$(fdisk -l "$SRC_DEVICE" | grep Disk | awk '{print $5;}')
    echo $SRC
-   SRC_SIZE=$(fdisk -l $SRC_DEVICE | grep Linux | awk '{print $4;}')
+   SRC_SIZE=$(fdisk -l "$SRC_DEVICE" | grep Linux | awk '{print $4;}')
    SRC_SIZE=$(expr $SRC_SIZE \* 512)
    CHOSEN_SIZE=$SRC_SIZE
    echo $SRC_SIZE
@@ -218,7 +220,8 @@ EOF
    if test $? -ne 0 ; then return 99; fi
    DEST=$(echo "$DEST" | awk '{print $1;}')    # trim trailing spaces
    # currently, the decision on whether destination is a SD card is based upon "mmcblk"
-   dest_nibble=$(echo $DEST | awk '{print $1}')
+   dest_nibble=$(echo "$DEST" | awk '{print $1}')
+   DEST_DEVICE=/dev/$dest_nibble
    echo $DEST_SIZE
    dest_is_file=
    echo $DEST_DEVICE | grep $LAPTOP_DEVICE > /dev/null
@@ -227,6 +230,7 @@ EOF
       DEST_DEVICE=/dev/$dest_nibble
       # pick the partition
       DEST_PARTITION=$(selectPartition $DEST_DEVICE)
+      DEST_PARTITION_MOUNT=/mnt/$dest_nibble
       if [ $? -ne 0 ]; then return 99; fi
       # trim the response
       DEST_PARTITiON=$(echo $DEST_PARTITION | awk '{print $1}')
@@ -319,8 +323,7 @@ createFilename(){
    # generate mount specifiers
    SRC_PARTITION_NIBBLE=${SRC_PARTITION:5}
    SRC_MNT=/mnt/$SRC_PARTITION_NIBBLE
-   DEST_PARTITION_NIBBLE=${DEST:5}
-   DEST_MNT=/mnt/$DEST_PARTITION_NIBBLE
+   DEST_MNT=$DEST_PARTITION_MOUNT
    name=
    if [ -f /opt/name ]; then
       name=$(cat /opt/name)
@@ -330,7 +333,7 @@ createFilename(){
       label=$(cat /opt/label)
    fi
    TITLE=$(gettext "Please identify this copy")
-   MSG=$(gettext "Requires name and short identifying label")
+   MSG=$(gettext "Requires your name and short identifying label")
    exec 3>&1
    DATA=$(dialog --output-separator ":" --title "$TITLE" --form "$MSG" 10 80 3 \
          "Name:" 1 1 "$name" 1 7 15 0 \
@@ -345,7 +348,7 @@ createFilename(){
    echo $LABEL > /opt/label
    echo $NAME > /opt/name
    iiab_label $SRC_PARTITION $NAME $LABEL
-   TARGET=$DEST_MNT/$(cat /tmp/duper/identifier_filename)
+   TARGET=$DEST_PARTITION_MOUNT/$(cat /tmp/duper/identifier_filename)
    echo $TARGET > /opt/lapdup_filename
    return 0
 }
@@ -437,7 +440,8 @@ finalVerification(){
    fi
   output_size=$(bytesToHuman $output_size)
   title=$(gettext "Final Verification")
-  msg=$(gettext "\n\nSource: $SRC_DEVICE  Bytes to copy: $(bytesToHuman $CHOSEN_SIZE) \
+  msg=$(gettext "\n\nSource: $SRC_DEVICE  Bytes to copy: $(bytesToHuman $CHOSEN_SIZE)\n \
+                     Source device capacity: $(bytesToHuman $SRC_DEVICE_HOLDS)
   \n\nDestination: $write_to   \nSpace on Destination: $output_size")
   dialog --title "$title" --yesno "$msg" 20 80
   if test $? -ne 0 ; then return 99; fi
@@ -505,6 +509,7 @@ EOF
    source /tmp/duper/partition
    if test $? -ne 0 ; then return 99; fi
    dest_is_file=true
+   echo $PARTITION
 }
 
 selectImage(){

@@ -117,30 +117,30 @@ iiab_label(){
    PARTITION=$1
    USER=$2
    LABEL=$3
-   mkdir -p /tmp/sdcard
-   mount $PARTITION /tmp/sdcard > /dev/null
+   mkdir -p /tmp/duper/sdcard
+   mount $PARTITION /tmp/duper/sdcard > /dev/null
 
-   if [ ! -d /tmp/sdcard/opt/iiab/iiab ]; then
+   if [ ! -d /tmp/duper/sdcard/opt/iiab/iiab ]; then
      echo "Device is not IIAB root partition. Exiting."
      exit 1
    fi
 
    # create id for image
-   pushd /tmp/sdcard/opt/iiab/iiab
+   pushd /tmp/duper/sdcard/opt/iiab/iiab
    HASH=`git log --pretty=format:'g%h' -n 1`
    YMD=$(date +%y%m%d)
    FILENAME=$(printf "%s-%s-%s-%s-%s-%s.img" $PRODUCT $VERSION $USER $LABEL $YMD $HASH)
-   echo $FILENAME > /tmp/identifier_filename
-   echo $FILENAME > /tmp/sdcard/.iiab-image
-   git branch >> /tmp/sdcard/.iiab-image
-   git log -n 5 >> /tmp/sdcard/.iiab-image
-   cat /tmp/sdcard/etc/rpi-issue >> /tmp/sdcard/.iiab-image
+   echo $FILENAME > /tmp/duper/identifier_filename
+   echo $FILENAME > /tmp/duper/sdcard/.iiab-image
+   git branch >> /tmp/duper/sdcard/.iiab-image
+   git log -n 5 >> /tmp/duper/sdcard/.iiab-image
+   cat /tmp/sdcard/duper/etc/rpi-issue >> /tmp/sdcard/.iiab-image
 
    echo $FILENAME > ../../last-filename
    echo $HASH > ../../last-hash
    popd
-   umount /tmp/sdcard
-   rmdir /tmp/sdcard
+   umount /tmp/duper/sdcard
+   rmdir /tmp/dupersdcard
 }
 
 auto_expand(){
