@@ -91,23 +91,24 @@ size_image(){
    parted -s $DEVICEREF rm $LIBRARY_PARTITION
    parted -s $DEVICEREF unit s mkpart primary ext4 $root_start $root_end
 
-   mount $PARTITION
    losetup -d $DEVICEREF
    exit 0
 }
 
-ptable(){
+ptable_size(){
    # parameter is filename of image
    DEVICEREF=$(losetup -f)
    $(losetup -P $DEVICEREF $1)
    if [ $? -ne 0 ];then
-      echo failed to create RAWDEVICE reference for $1
+      error_msg="failed to create RAWDEVICE reference for $1"
       losetup -d $DEVICEREF
       exit 1
    fi
-   fdisk  -l $DEVICEREF
+   sectors=$(fdisk  -l $DEVICEREF | grep ${DEVICEFEF}p2 | awk '{print $3}')
    losetup -d $DEVICEREF
+   echo "$sectors * 512" | bc
 }
+
 iiab_label(){
    if [ $# -ne 3 ];then
       echo "requires parameters partition, username, labelstring"

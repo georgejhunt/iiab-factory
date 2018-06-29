@@ -15,6 +15,7 @@ export TEXTDOMAIN=piconf
 declare SRC_DEVICE=/dev/mmcblk0
 declare SRC_DEVICE_SIZE
 declare SRC_PARTITION=/dev/mmcblk0p2
+declare SRC_PARTITIONED_SIZE       # total bytes specified in partition table
 declare SRC_FILE_SIZE
 declare DEST_DEVICE=/dev/sda
 declare DEST_DEVICE_SIZE
@@ -24,7 +25,7 @@ declare LAPTOP_DEVICE=sda
 declare LAPTOP_MOUNT=/mnt/sda1
 declare TINY_CORE_DEVICE=sdb       # the Tiny Core Linux boot device
 ##############   Inputs to shared functions  ##########
-declare WILLITFIT_SRC
+declare WILLITFIT_SRC_SIZE
 declare WILLITFIT_SRC_SPEC
 declare WILLITFIT_DEST_SIZE
 declare WILLITFIT_DEST_SPEC
@@ -136,8 +137,11 @@ EOF
       echo "$d $size $units" | awk '{printf("\"%-10s \"    \"%-6s %-6s\" \\\n",$1,$2,$3)}'
    done ) >> /tmp/duper/src
    echo  "3>&1 1>&2 2>&3)" >> /tmp/duper/src
-   source /tmp/duper/src
-   if test $? -ne 0 ; then return 99; fi
+   SRC=$(source /tmp/duper/src)
+   if test $? -ne 0 ; then 
+      error_msg = $SRC
+      exit 99
+   fi
    SRC_NIBBLE=$(echo $SRC | awk '{print $1}')
    SRC_DEVICE=/dev/$SRC_NIBBLE
    echo $SRC
@@ -166,18 +170,20 @@ selectSDDestination(){
    echo > /tmp/duper/sddevice
    cat << EOF > /tmp/duper/sddevice
 TITLE=\$(gettext "\"Choose SD card as Destination\"")
-MSG=\$(gettext "\"Use care that you do not select the SD card you are copying from. \n\n\n \\
+MSG=\$(gettext "\"If you have not removed the source SD card, and replaced it with a blank SD, \ndo not select mmcblk0.. \n\n\n \\
 device            size        mounted to\n \\
 =================================================================================\"")
 DEST=\$(dialog --title "\$TITLE" --clear --ok-label "Select"  \\
  --menu "\$MSG" 20 90 25    \\
 EOF
-   (lsblk -o NAME,SIZE,TYPE  | grep disk | grep -v -e sdb -e sda -e zram0 | sort > /tmp/duper/scratch
-   awk '{ printf("\"%-16s\"  \" %-10s\"  \\\n",$1,$2);}' ) >> /tmp/duper/sddevice
+   (lsblk -o NAME,SIZE,TYPE  | grep disk | grep -v -e sdb -e sda -e zram0 | \
+      awk '{ printf("\"%-16s\"  \" %-10s\"  \\\n",$1,$2);}' ) >> /tmp/duper/sddevice
    echo  3\>\&1 1\>\&2 2\>\&3\) >> /tmp/duper/sddevice
-   source /tmp/duper/sddevice
-   if test $? -ne 0 ; then return 99; fi
-   DEST_NIBBLE=$(echo $DEST | awk '{print $1}')
+   echo "echo \$DEST" >> /tmp/duper/sddevice
+   error_msg=$(source /tmp/duper/sddevice)
+   if test $? -ne 0 ; then exit 99; fi
+   DEST_NIBBLE=$(echo "$error_msg" | awk '{print $1}')
+   error_msg=
    DEST_DEVICE=/dev/$DEST_NIBBLE
    DEST_SIZE=$(fdisk -l $DEST_DEVICE | grep Disk | cut -d" " -f 5)
    WILLITFIT_DEST_SIZE=$DEST_SIZE
@@ -224,7 +230,7 @@ EOF
       if [ $? -ne 0 ]; then return 99; fi
       # trim the response
       DEST_PARTITiON=$(echo $DEST_PARTITION | awk '{print $1}')
-      DEST_FREE=$(/usr/local/bin/df  | grep $DEST_PARTITION | awk '{print $4}')
+      DEST_FREE=$(/usr/local/bin/df -l | grep $DEST_PARTITION | awk '{print $4}')
       # coreutils tce make the above work - really required for dd progress
    #   DEST_FREE=$(/bin/df  | grep $DEST_PARTITION | awk '{print $4}')
       DEST_FREE=$(expr "$DEST_FREE" \* 1024)
@@ -432,7 +438,7 @@ finalVerification(){
   output_size=$(bytesToHuman $output_size)
   title=$(gettext "Final Verification")
   msg=$(gettext "\n\nSource: $SRC_DEVICE  Bytes to copy: $(bytesToHuman $CHOSEN_SIZE) \
-  \nDestination: $write_to   \n\nSpace on Destination: $output_size")
+  \n\nDestination: $write_to   \nSpace on Destination: $output_size")
   dialog --title "$title" --yesno "$msg" 20 80
   if test $? -ne 0 ; then return 99; fi
 }
@@ -497,6 +503,8 @@ EOF
       >> /tmp/duper/partition
    echo  "3>&1 1>&2 2>&3)" >> /tmp/duper/partition
    source /tmp/duper/partition
+   if test $? -ne 0 ; then return 99; fi
+   dest_is_file=true
 }
 
 selectImage(){
@@ -524,7 +532,7 @@ EOF
 
    # trim the string
    CHOICE=$(echo $CHOICE | awk '{print $1}')
-   echo $DEST_PARTITION/iiab/$(get_nth $CHOICE $image_list )
+   echo $LAPTOP_MOUNT/iiab/$(get_nth $CHOICE $image_list )
 }
 
 selectFile(){
@@ -536,11 +544,13 @@ selectFile(){
 EOF
    image_path=$(selectImage $PART/iiab $TMP_FILE )
    if test $? -ne 0; then return 99; fi
-   SRC_FILE_SIZE=$(df -l $image_path | awk '{print $5}')
-   WILITFIT_SRC=$SRC_FILE_SIZE
+   SRC_DEVICE=$image_path
+   SRC_FILE_SIZE=$(ptable_size $image_path)
+   WILLITFIT_SRC_SIZE=$SRC_FILE_SIZE
+   CHOSEN_SIZE=$SRC_FILE_SIZE
 }
 
-selectSDDestination(){
+selectSDDestinationgh(){
    echo > /tmp/duper/sddevice
    lsblk -o NAME,SIZE,TYPE  | grep disk | grep -v -e sdb -e sda -e zram0 | sort > /tmp/duper/scratch
    cat << EOF > /tmp/duper/sddevice
@@ -553,25 +563,22 @@ DEST=\$(dialog --title "\$TITLE" --clear --ok-label "Select"  \\
 EOF
    awk '{ printf("\"%-16s\"  \" %-10s\"  \\\n",$1,$2);}' /tmp/duper/scratch >> /tmp/duper/sddevice
    echo  3\>\&1 1\>\&2 2\>\&3\) >> /tmp/duper/sddevice
-   source /tmp/duper/sddevice
-   if test $? -ne 0 ; then return 99; fi
+   error_msg=$(source /tmp/duper/sddevice)
+   if test $? -ne 0 ; then exit 99; fi
    DEST_DEVICE=/dev/$(echo $DEST | awk '{print $1}')
    DEST_SIZE=$(fdisk -l $DEST_DEVICE | grep Disk | cut -d" " -f 5)
    WILLITFIT_DEST_SIZE=$DEST_SIZE
+   dest_is_file=false
 }
 
 ################   Top Level Action Routines   ####################
 copySD(){
    selectSource
-   if [ $? = 99 ];then return 99; fi
    selectDestination
    if [  "$dest_is_file" = "true" ]; then
       createFilename
-   else
-      assertDeviceIsUSB
    fi
    willItFit
-   if [ $? = 99 ];then return 99; fi
    finalVerification
    #ddCopy
 }
@@ -595,7 +602,7 @@ EOF
 It's new size will be $human. Do you want to proceed?")
    
    dialog --title "$TITLE" --yesno "$MSG" 6 80
-   if test $? -ne 0; then return 99; fi
+   if test $? -ne 0; then exit 99; fi
 
    size_image $image_path
    return 99 
@@ -603,17 +610,15 @@ It's new size will be $human. Do you want to proceed?")
 
 image2SD(){
    selectFile   # source returned in CHOICE
-   if [ $? = 99 ];then return 99; fi
    selectSDDestination
-   if [ $? = 99 ];then return 99; fi
    willItFit
-   if [ $? = 99 ];then return 99; fi
+   finalVerification
    # doDdCopy
 }
 
 deleteImage(){
    TMP_FILE=/tmp/duper/delete
-   PART_MOUNT=$DEST_PARTITION
+   PART_MOUNT=$LAPTOP_MOUNT
    PART=$DEST_PARTiTION
    cat << EOF > $TMP_FILE
    TITLE=$(gettext "\"Choose a File to Delete\"")
@@ -632,7 +637,10 @@ Do you want to proceed?")
    # at boot, the read-only driver loads
    umount $PART_MOUNT
    mount -t ntfs-3g "$PART" "$DEST_MNT"
-   rm -f $image_path
+   echo $image_path | grep iiab  # protection for total hard disk wipeout
+   if [ $? -eq 0 ]; then
+      rm -f $image_path
+   fi
    return 99 
 }
 
@@ -664,23 +672,30 @@ mainMenu(){
          ;;
       delete) deleteImage
          ;;
-      help|*)
-         usage
-         ;;
       terminal)
          clear
-         exit 0
+         resume_text=$(gettext "Thank you for using the IIAB duper, You can Copy more SD cards by \
+         typing \"duper\".\n\n")
+         echo -e $resume_text
+         exit 1
+         ;;
+      help|*)
+         usage
          ;;
    esac
 }
 
 cleanup(){
    if [ $? -eq 99 ]; then
+      if [ ! -z "$error_msg" ]; then
+         dialog --title "ERROR" --info $error_msg
+         error_msg=
+      fi
       main
    fi
-   umount /mnt/$SRC_DEVICE
+   umount /mnt/$SRC_DEVICEi &> /dev/null
    if [ "$dest_is_usb" = "true" ]; then
-      umount "$DEST_DEVICE"
+      umount "$DEST_DEVICE" &> /dev/null
    fi
 }
 
