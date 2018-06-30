@@ -134,23 +134,23 @@ iiab_label(){
    echo $FILENAME > /tmp/duper/sdcard/.iiab-image
    git branch >> /tmp/duper/sdcard/.iiab-image
    git log -n 5 >> /tmp/duper/sdcard/.iiab-image
-   cat /tmp/sdcard/duper/etc/rpi-issue >> /tmp/sdcard/.iiab-image
+   cat /tmp/duper/sdcard/duper/etc/rpi-issue >> /tmp/duper/sdcard/.iiab-image
 
    echo $FILENAME > ../../last-filename
    echo $HASH > ../../last-hash
    popd
    umount /tmp/duper/sdcard
-   rmdir /tmp/dupersdcard
+   rmdir /tmp/duper/sdcard
 }
 
 auto_expand(){
    # receives partition as $1, assumes IIAB is loaded on that partition
    PARTITION=$1
-   mkdir -p /tmp/sdcard
-   mount $PARTITION /tmp/sdcard
+   mkdir -p /tmp/duper/sdcard
+   mount $PARTITION /tmp/duper/sdcard
 
-   touch /tmp/sdcard/.resize-rootfs
-   umount /tmp/sdcard
+   touch /tmp/duper/sdcard/.resize-rootfs
+   umount /tmp/duper/sdcard
 }
 
 bytesToHuman() {
@@ -161,4 +161,15 @@ bytesToHuman() {
         let s++
     done
     echo "$b$d ${S[$s]}"
+}
+
+persistVariable(){
+   # Save name value pair $1 $2
+   # see if it already exists
+   grep $1 $PERSIST_STATE_FILE
+   if [ $? -eq 0 ]; then
+      sed -i -e "s/^$1=.*/$1=$2/" $PERSIST_STATE_FILE
+   else
+      echo "$1=$2" >> $PERSIST_STATE_FiLE
+   fi
 }

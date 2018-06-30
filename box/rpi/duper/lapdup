@@ -31,6 +31,7 @@ declare WILLITFIT_DEST_SIZE
 declare WILLITFIT_DEST_SPEC
 declare DD_SRC
 declare DD_DEST
+declare PERSIST_STATE_FILE=/opt/duper/state
 
 # i18n stuff
 if test "$USE_NLS" = "yes" && type -p gettext > /dev/null; then
@@ -137,10 +138,12 @@ EOF
       echo "$d $size $units" | awk '{printf("\"%-10s \"    \"%-6s %-6s\" \\\n",$1,$2,$3)}'
    done ) >> /tmp/duper/src
    echo  "3>&1 1>&2 2>&3)" >> /tmp/duper/src
+   echo "rtn=\$?" 
    echo "echo \$SRC" >> /tmp/duper/src
+   echo "return \$rtn" >> /tmp/duper/src
    SRC=$(source /tmp/duper/src)
    if test $? -ne 0 ; then 
-      error_msg = $SRC
+      error_msg=$SRC
       exit 99
    fi
    SRC_NIBBLE=$(echo "$SRC" | awk '{print $1}')
@@ -222,12 +225,12 @@ EOF
    # currently, the decision on whether destination is a SD card is based upon "mmcblk"
    dest_nibble=$(echo "$DEST" | awk '{print $1}')
    DEST_DEVICE=/dev/$dest_nibble
+   DEST_SIZE=$(fdisk -l $DEST_DEVICE | grep Disk | cut -d" " -f 5)
    echo $DEST_SIZE
    dest_is_file=
    echo $DEST_DEVICE | grep $LAPTOP_DEVICE > /dev/null
    if [ $? -eq 0 ];then
       dest_is_file=true
-      DEST_DEVICE=/dev/$dest_nibble
       # pick the partition
       DEST_PARTITION=$(selectPartition $DEST_DEVICE)
       DEST_PARTITION_MOUNT=/mnt/${DEST_PARTITION:5}
@@ -238,7 +241,6 @@ EOF
       # coreutils tce make the above work - really required for dd progress
    #   DEST_FREE=$(/bin/df  | grep $DEST_PARTITION | awk '{print $4}')
       DEST_FREE=$(expr "$DEST_FREE" \* 1024)
-      DEST_SIZE=$(fdisk -l $DEST_DEVICE | grep Disk | cut -d" " -f 5)
    fi
 }
 
@@ -370,7 +372,7 @@ finalVerification(){
                      Source device capacity: $(bytesToHuman $SRC_DEVICE_HOLDS)
   \n\nDestination: $write_to   \nSpace on Destination: $output_size")
   dialog --title "$title" --yesno "$msg" 20 80
-  if test $? -ne 0 ; then return 99; fi
+  if test $? -ne 0 ; then exit 99; fi
 }
 
 ####################### copy the data #################################
@@ -390,14 +392,14 @@ ddCopy(){
    if [ ! -e fifo ]; then
       mkfifo fifo
    fi
-   dd status=progress if="$SRC_DEVICE" of="$write_to" bs=4096 count=$WRITE_COUNT 2>fifo &
+   dd status=progress if="$SRC_DEVICE" of="$write_to" bs=4096 count=$WRITE_COUNT 2>>fifo &
 
    # now read the fifo and update the gauge
    lastcopied=
    set +x
    while true; do
       sleep 5
-      line=$(cat fifo)
+      line=$(tail -n1 fifo)
       copied=$(echo $line | awk '{print $1}')
       if [ "$copied" = "$lastcopied" ]; then break; fi
       lastcopied=$copied
