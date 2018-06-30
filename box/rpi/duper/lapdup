@@ -217,7 +217,7 @@ EOF
    done ) >> /tmp/duper/copyto
    echo  "3>&1 1>&2 2>&3)" >> /tmp/duper/copyto
    source /tmp/duper/copyto
-   if test $? -ne 0 ; then return 99; fi
+   if test $? -ne 0 ; then exit 99; fi
    DEST=$(echo "$DEST" | awk '{print $1;}')    # trim trailing spaces
    # currently, the decision on whether destination is a SD card is based upon "mmcblk"
    dest_nibble=$(echo "$DEST" | awk '{print $1}')
@@ -230,8 +230,8 @@ EOF
       DEST_DEVICE=/dev/$dest_nibble
       # pick the partition
       DEST_PARTITION=$(selectPartition $DEST_DEVICE)
-      DEST_PARTITION_MOUNT=/mnt/$dest_nibble
-      if [ $? -ne 0 ]; then return 99; fi
+      DEST_PARTITION_MOUNT=/mnt/${DEST_PARTITION:5}
+      if [ $? -ne 0 ]; then exit 99; fi
       # trim the response
       DEST_PARTITiON=$(echo $DEST_PARTITION | awk '{print $1}')
       DEST_FREE=$(/usr/local/bin/df -l | grep $DEST_PARTITION | awk '{print $4}')
@@ -240,34 +240,6 @@ EOF
       DEST_FREE=$(expr "$DEST_FREE" \* 1024)
       DEST_SIZE=$(fdisk -l $DEST_DEVICE | grep Disk | cut -d" " -f 5)
    fi
-}
-
-junk(){
-   ls -l $LAPTOP_MOUNT/iiab |  \
-      awk '{ printf("\"%-16s\"  \" %10s s\"  \\\n",$9,$5);}' | \
-         tee -a /tmp/duper/copyto
-   df -hT | grep Disk | grep -v -e $LAPTOP_DEVICE -e $TINY_CORE_DEVICE | sort | \
-      awk ' { printf("\"%-16s\"  \"%-5s %10s %10s %10s %6s    %-15s\"  \\\n",$1,$2,$3,$4,$5,$6,$7);}' | \
-         tee -a /tmp/duper/copyto
-   echo  3\>\&1 1\>\&2 2\>\&3\) >> /tmp/duper/copyto
-}
-isUSB() {
-  #typeset deviceName=/sys/block/${1#/dev/}
-  udevadm info --query=symlink --name="$1" | grep usb
-}
-
-assertDeviceIsUSB() {
-   typeset deviceType
-   dest_is_usb=
-   deviceType=$(getDeviceType "$selectedDevice")
-   if [ "$deviceType" != "usb" ]  ; then
-      msg=$(gettext "The device you selected is not connected through USB (found BUS: \`$deviceType'.\
-      Exiting ...")
-      title="FATAL ERROR"
-      dialog --title "$title" --yesno "$msg" 6 80
-      return 99 
-   fi
-   dest_is_usb=true
 }
 
 selectTruncate(){
@@ -286,36 +258,6 @@ selectTruncate(){
    return 0
 }
 
-dummy(){
-#   reminder expr returns 1 if true
-   if [ $(expr $SIZE_DIFF \> 8000000000) -eq 1 ]; then
-      MENU_TITLE=$(gettext "Data on Source Sd card occupies $(bytesToHuman "$MIN_SIZE")")
-      FUN=$(dialog --title "Choose the size of the output SD card" --backtitle "Choose SD size" \
-      --menu "Choose SD Size" 17 80 5  --cancel-button Finish --ok-button Select \
-        "1 128 GB SD card" "Will verify that space exists" \
-        "2 64 GB SD card" "" \
-        "3 32 GB SD card" "" \
-        "4 16 GB SD card" "" \
-        "5 Smallest possible" "Written to available SD" \
-        3>&1 1>&2 2>&3)
-
-      RET=$?
-      if [ $RET -eq 0 ]; then
-        case "$FUN" in
-          1\ *) CHOSEN_SIZE=$sd128GB ;;
-          2\ *) CHOSEN_SIZE=$sd64GB ;;
-          3\ *) CHOSEN_SIZE=$sd32GB ;;
-          4\ *) CHOSEN_SIZE=$sd16GB ;;
-          5\ *) CHOSEN_SIZE=$MIN_SIZE ;;
-        esac
-      fi
-      # Can't choose a size where the data will not fit
-      if [ $(expr $CHOSEN_SIZE \< $MIN_SIZE) -eq 1 ]; then
-         CHOSEN_SIZE=$MIN_SIZE
-      fi
-   fi
-   return 0
-}
 ################### Identify the copy  #####################
 
 # Fetch username and appropriate label
@@ -348,24 +290,8 @@ createFilename(){
    echo $LABEL > /opt/label
    echo $NAME > /opt/name
    iiab_label $SRC_PARTITION $NAME $LABEL
-   TARGET=$DEST_PARTITION_MOUNT/$(cat /tmp/duper/identifier_filename)
+   TARGET=$DEST_PARTITION_MOUNT/iiab/$(cat /tmp/duper/identifier_filename)
    echo $TARGET > /opt/lapdup_filename
-   return 0
-}
-
-# check source and destination exist
-existCheck(){
-   if [ "$dest_is_usb" = "true" ]; then
-     write_to="$DEST_DEVICE"
-   else
-     write_to="$DEST_PARTITION"
-   fi
-   if [ ! -e "$write_to" ] || [ ! -e "$SRC_DEVICE" ]; then  
-       title=$(gettext "Result")
-       msg=$(gettext "Source $SRC_DEVICE or Destination $write_to not found")
-       dialog --title "$title"  --msgbox "$msg" 20 60
-       return 99 
-   fi
    return 0
 }
 
@@ -453,8 +379,9 @@ ddCopy(){
       write_to="$DEST_DEVICE"
    else
       write_to="$TARGET"
+      mkdir -p $(dirname $TARGET)
    fi
-   # figure out how many erase_blocks to write
+   # figure out how many 4K blocks to write
    WRITE_COUNT=$( echo "( $CHOSEN_SIZE / 4096 ) + 1" | bc )
 
    # at boot, the read-only driver loads
@@ -463,7 +390,7 @@ ddCopy(){
    if [ ! -e fifo ]; then
       mkfifo fifo
    fi
-   # dd status=progress if="$SRC_DEVICE" of="$write_to" bs=4096 count=$WRITE_COUNT 2>fifo &
+   dd status=progress if="$SRC_DEVICE" of="$write_to" bs=4096 count=$WRITE_COUNT 2>fifo &
 
    # now read the fifo and update the gauge
    lastcopied=
@@ -507,14 +434,17 @@ EOF
       >> /tmp/duper/partition
    echo  "3>&1 1>&2 2>&3)" >> /tmp/duper/partition
    source /tmp/duper/partition
-   if test $? -ne 0 ; then return 99; fi
+   if test $? -ne 0 ; then exit 99; fi
    dest_is_file=true
    echo $PARTITION
 }
 
 selectImage(){
+   # called by selectFile, makeSmaller, deleteImage
+   # returns full path selected
+   # updates SRC_MOUNT
    local PART_MOUNT=$1
-   local TMP_FILE=$2
+   local TMP_FILE=$2=
    declare -a lookup
    mkdir -p $(dirname $2)
    cat << EOF > "$TMP_FILE"
@@ -537,10 +467,12 @@ EOF
 
    # trim the string
    CHOICE=$(echo $CHOICE | awk '{print $1}')
-   echo $LAPTOP_MOUNT/iiab/$(get_nth $CHOICE $image_list )
+   echo $PART_MOUNT/iiab/$(get_nth $CHOICE $image_list )
+   SRC_MOUNT=$PART_MOUNT
 }
 
 selectFile(){
+   # called by image2SD
    TMP_FILE=/tmp/duper/copy2sd
    PART=$LAPTOP_MOUNT
    cat << EOF > "$TMP_FILE"
@@ -585,7 +517,7 @@ copySD(){
    fi
    willItFit
    finalVerification
-   #ddCopy
+   ddCopy
 }
 
 makeSmaller(){
@@ -630,14 +562,14 @@ deleteImage(){
    MSG=$(gettext "\"Highlight the file you wish to delete\"")
 EOF
    image_path=$(selectImage  $PART_MOUNT/iiab $TMP_FILE )
-   if test $? -ne 0; then return 99; fi
+   if test $? -ne 0; then exit 99; fi
 
    TITLE=$(gettext "OK to proceed?")
    MSG=$(gettext "The image file $image_path is about to be deleted. \
 Do you want to proceed?")
    
    dialog --title "$TITLE" --yesno "$MSG" 6 80
-   if test $? -ne 0; then return 99; fi
+   if test $? -ne 0; then exit 99; fi
 
    # at boot, the read-only driver loads
    umount $PART_MOUNT
