@@ -34,6 +34,9 @@ declare DD_SRC
 declare DD_DEST
 declare PERSIST_STATE_FILE=/opt/duper/state
 
+# Persistence will be maintained for
+# User name, label, Laptop partition used by duper,
+
 # i18n stuff
 if test "$USE_NLS" = "yes" && type -p gettext > /dev/null; then
   xecho() {
@@ -102,6 +105,7 @@ initialize(){
    erase_block=8192   # size in sectors
    export TERM=xterm
    mkdir -p /tmp/duper
+   mkdir -p /opt/duper
 }
 
 checkSudo() {
@@ -426,10 +430,16 @@ get_nth(){
 
 selectPartition(){
    local device=$1
+   local default=$(persistVariable PREFERRED_PARTITION $device)
+   if [ ! -z "$default" ]; then
+      DEFAULT="--default $default"
+   else
+      DEFAULT=
+   fi
    cat << EOF > /tmp/duper/partition
-   TITLE=$(gettext "Select Destination Partition")
+   TITLE=$(gettext "Select Partition")
    MSG=$(gettext "Probably should pick the ntfs partition with the most free space")
-   PARTITION=\$(dialog --title "\$TITLE" --clear --ok-label "Select"  \\
+   PARTITION=\$(dialog --title "\$TITLE" --clear --ok-label "Select"  "$DEFAULT" \\
        --menu "\$MSG" 20 90 25    \\
 EOF
    (df -hT | grep $device | \
@@ -440,6 +450,7 @@ EOF
    if test $? -ne 0 ; then return 99; fi
    dest_is_file=true
    echo $PARTITION
+
 }
 
 selectImage(){

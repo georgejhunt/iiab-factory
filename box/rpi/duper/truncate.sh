@@ -173,3 +173,9 @@ persistVariable(){
       echo "$1=$2" >> $PERSIST_STATE_FiLE
    fi
 }
+
+getPersistedVariable(){
+   grep $1 $DERSIST_STATE_FILE
+   if [ $? -eq 0 ]; then
+      echo $(grep $1 $DERSIST_STATE_FILE | cut -d= -f2)
+   fi
