@@ -170,12 +170,12 @@ persistVariable(){
    if [ $? -eq 0 ]; then
       sed -i -e "s/^$1=.*/$1=$2/" $PERSIST_STATE_FILE
    else
-      echo "$1=$2" >> $PERSIST_STATE_FiLE
+      (echo "$1=$2") >> $PERSIST_STATE_FiLE
    fi
 }
 
 getPersistedVariable(){
-   grep $1 $DERSIST_STATE_FILE
+   grep $1 $PERSIST_STATE_FILE
    if [ $? -eq 0 ]; then
-      echo $(grep $1 $DERSIST_STATE_FILE | cut -d= -f2)
+      echo $(grep $1 $PERSIST_STATE_FILE | cut -d= -f2)
    fi

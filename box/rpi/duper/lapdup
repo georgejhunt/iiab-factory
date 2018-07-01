@@ -199,7 +199,7 @@ EOF
    WILLITFIT_DEST_SIZE=$DEST_SIZE
 }
 
-selectDestination(){
+selectDevice(){
    declare -a deviceList
    # the source should not be listed as a potential destination
    echo > /tmp/duper/copyto
@@ -227,13 +227,19 @@ EOF
    source /tmp/duper/copyto
    if test $? -ne 0 ; then return 99; fi
    DEST=$(echo "$DEST" | awk '{print $1;}')    # trim trailing spaces
-   # currently, the decision on whether destination is a SD card is based upon "mmcblk"
-   dest_nibble=$(echo "$DEST" | awk '{print $1}')
-   DEST_DEVICE=/dev/$dest_nibble
+   echo $DEST
+}
+
+selectDestination(){
+   DEST=$(selectDevice)
+   DEST_DEVICE=/dev/$DEST
    DEST_SIZE=$(fdisk -l $DEST_DEVICE | grep Disk | cut -d" " -f 5)
-   echo $DEST_SIZE
+   LAPTOP_DEVICE=/dev/$DEST
+   LAPTOP_MOUNT=/mnt/$DEST
+   LAPTOP_DIR=$LAPTOP_MOUNT/iiab
    dest_is_file=
    echo $DEST_DEVICE | grep $LAPTOP_DEVICE > /dev/null
+   # is 
    if [ $? -eq 0 ];then
       dest_is_file=true
       # pick the partition
@@ -439,7 +445,7 @@ selectPartition(){
    cat << EOF > /tmp/duper/partition
    TITLE=$(gettext "Select Partition")
    MSG=$(gettext "Probably should pick the ntfs partition with the most free space")
-   PARTITION=\$(dialog --title "\$TITLE" --clear --ok-label "Select"  "$DEFAULT" \\
+   PARTITION=\$(dialog --title "\$TITLE" --clear --ok-label "Select"  $DEFAULT \\
        --menu "\$MSG" 20 90 25    \\
 EOF
    (df -hT | grep $device | \
@@ -576,7 +582,7 @@ image2SD(){
 
 deleteImage(){
    TMP_FILE=/tmp/duper/delete
-   PART_MOUNT=$LAPTOP_MOUNT
+   PART_MOUNT=$d(selectPartition  $)
    PART=$DEST_PARTiTION
    cat << EOF > $TMP_FILE
    TITLE=$(gettext "\"Choose a File to Delete\"")
