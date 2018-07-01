@@ -24,7 +24,8 @@ declare DEST_PARTITION_SIZE
 declare LAPTOP_DEVICE=sda
 declare LAPTOP_MOUNT=/mnt/sda1
 declare LAPTOP_DIR=/mnt/sda1/iiab
-declare TINY_CORE_DEVICE=sdb       # the Tiny Core Linux boot device
+declare TINY_CORE_NIBBLE=sdb       # the Tiny Core Linux boot device
+declare BOOT_DEVICE=/dev/sdb       # the Tiny Core Linux boot device
 ##############   Inputs to shared functions  ##########
 declare WILLITFIT_SRC_SIZE
 declare WILLITFIT_SRC_SPEC
@@ -102,7 +103,9 @@ initialize(){
         mount /dev/$dev /mnt/$dev 2>&1 > /dev/null
      fi
    done
-   erase_block=8192   # size in sectors
+   BOOT_DEVICE=$(grep /home /etc/mtab | awk '{print $1}')
+   BOOT_DEVICE=${BOOT_DEVICE:0:8}
+   TINY_CORE_NIBBLE=${BOOT_DEVICE:5}
    export TERM=xterm
    mkdir -p /tmp/duper
    mkdir -p /opt/duper
@@ -121,6 +124,10 @@ checkSudo() {
   fi
 }
 
+isUSB() {
+  udevadm info --query=symlink --name="$1" | grep usb
+}
+
 ################  Choose Source  ###################
 selectSource(){
    declare -a deviceList
@@ -136,7 +143,7 @@ EOF
    devices=$(getDevicesList $deviceList)
    (for d in $devices; do
       if [ "$d" = "$LAPTOP_DEVICE" ]; then continue; fi
-      if [ "$d" = "$TINY_CORE_DEVICE" ]; then continue; fi
+      if [ "$d" = "$TINY_CORE_NIBBLE" ]; then continue; fi
       if [ "$d" = "zram0" ]; then continue; fi
       size=$(fdisk -l /dev/$d | grep Disk | grep /dev/$dd | awk '{print $3}')
       units=$(fdisk -l /dev/$d | grep Disk | grep /dev/$dd | awk '{print $4}')
@@ -216,7 +223,7 @@ EOF
    devices=$(getDevicesList $deviceList)
    (for d in $devices; do
       if [ "$d" = "$SRC_DEVICE" ]; then continue; fi
-      if [ "$d" = "$TINY_CORE_DEVICE" ]; then continue; fi
+      if [ "$d" = "$TINY_CORE_NIBBLE" ]; then continue; fi
       if [ "$d" = "zram0" ]; then continue; fi
       if [ "$d" = "$SRC_NIBBLE" ]; then continue; fi
       size=$(fdisk -l /dev/$d | grep Disk | grep /dev/$dd | awk '{print $3}')
