@@ -133,7 +133,7 @@ selectSource(){
    declare -a deviceList
    echo > /tmp/duper/src
    cat << EOF > /tmp/duper/src
-TITLE=$(gettext "\"CHOOSE SOURCE SD CARD\"")
+TITLE=$(gettext "\"CHOOSE SOURCE SD CARD-$OBJECTIVE\"")
 MSG=$(gettext "\"Choose Source -- Probably a mmcblk device \n\n\n \\
 device            type        size      used       free     %       mounted to\n \\
 =================================================================================\"")
@@ -211,10 +211,10 @@ selectDevice(){
    # the source should not be listed as a potential destination
    echo > /tmp/duper/copyto
    cat << EOF > /tmp/duper/copyto
-      TITLE=$(gettext "\"Choose Destination\"")
+      TITLE=$(gettext "\"Choose Destination -- $OBJECTIVE\"")
       MSG=$(gettext "\"Choose Destination -- Either hard disk partition of type ntfs, or another SD Card \n \\
       \$MIN_SIZE_TEXT  \n\n\n \\
-      device            type        size      used       free     %       mounted to\n \\
+                               device      size   \n \\
    =================================================================================\"")
       DEST=\$(dialog --title "\$TITLE" --clear --ok-label "Select"  \\
        --menu "\$MSG" 20 90 25    \\
@@ -238,7 +238,7 @@ EOF
 }
 
 selectDestination(){
-   DEST=$(selectDevice)
+   DEST=$(selectDevice $OBJECTIVE)
    DEST_DEVICE=/dev/$DEST
    DEST_SIZE=$(fdisk -l $DEST_DEVICE | grep Disk | cut -d" " -f 5)
    LAPTOP_DEVICE=/dev/$DEST
@@ -250,7 +250,7 @@ selectDestination(){
    if [ $? -eq 0 ];then
       dest_is_file=true
       # pick the partition
-      DEST_PARTITION=$(selectPartition $DEST_DEVICE)
+      DEST_PARTITION=$(selectPartition $DEST_DEVICE $OBJECTIVE)
       DEST_PARTITION_MOUNT=/mnt/${DEST_PARTITION:5}
       if [ $? -ne 0 ]; then return 99; fi
       # trim the response
@@ -444,13 +444,14 @@ get_nth(){
 selectPartition(){
    local device=$1
    local default=$(persistVariable PREFERRED_PARTITION $device)
+   declare -n objective=$2
    if [ ! -z "$default" ]; then
       DEFAULT="--default $default"
    else
       DEFAULT=
    fi
    cat << EOF > /tmp/duper/partition
-   TITLE=$(gettext "Select Partition")
+   TITLE=$(gettext "Select Partition -- $OBJECTIVE")
    MSG=$(gettext "Probably should pick the ntfs partition with the most free space")
    PARTITION=\$(dialog --title "\$TITLE" --clear --ok-label "Select"  $DEFAULT \\
        --menu "\$MSG" 20 90 25    \\
@@ -470,7 +471,6 @@ selectImage(){
    # called by selectFile, makeSmaller, deleteImage
    # returns full path selected
    # updates SRC_MOUNT
-   local PART_MOUNT=$1
    local TMP_FILE=$2
    declare -a lookup
    mkdir -p $(dirname $2)
@@ -500,13 +500,17 @@ EOF
 
 selectFile(){
    # called by image2SD
+   local DEVICE_NIBBLE=$(selectDevice)
+   if test $? -ne 0; then return 99; fi
+   local DEVICE_MNT=/mnt/$DEVICE_NIBBLE
+   local PARTITION=$(selectPartition /dev/$DEVICE_NIBBLE)
+   if test $? -ne 0; then return 99; fi
    TMP_FILE=/tmp/duper/copy2sd
-   PART=$LAPTOP_MOUNT
    cat << EOF > "$TMP_FILE"
    TITLE=$(gettext "Select Source Image")
    MSG=$(gettext "Choose hard disk image to Copy to SD card")
 EOF
-   image_path=$(selectImage $PART/iiab $TMP_FILE )
+   image_path=$(selectImage $PARTITION/iiab $TMP_FILE )
    if test $? -ne 0; then return 99; fi
    SRC_DEVICE=$image_path
    SRC_FILE_SIZE=$(ptable_size $image_path)
@@ -553,12 +557,16 @@ copySD(){
 
 makeSmaller(){
    TMP_FILE=/tmp/duper/smaller
-   PART="$LAPTOP_MOUNT"
+   local DEVICE_NIBBLE=$(selectDevice)
+   if test $? -ne 0; then return 99; fi
+   local DEVICE_MNT=/mnt/$PART_NIBBLE
+   local PARTITION=$(selectPartition /dev/$DEVICE_NIBBLE)
+   if test $? -ne 0; then return 99; fi
    cat << EOF > "$TMP_FILE"
    TITLE=$(gettext "\"Choose Image to make Smaller\"")
    MSG=$(gettext "\"Must have unused space to be of much use\"")
 EOF
-   image_path=$(selectImage  $PART/iiab $TMP_FILE )
+   image_path=$(selectImage  $PARTITION/iiab $TMP_FILE )
 
    # get the proposed new size
    new_size=$(min_device_size $image_path)
@@ -589,7 +597,7 @@ image2SD(){
 
 deleteImage(){
    TMP_FILE=/tmp/duper/delete
-   PART_MOUNT=$d(selectPartition  $)
+   PART_MOUNT=$(selectPartition )
    PART=$DEST_PARTiTION
    cat << EOF > $TMP_FILE
    TITLE=$(gettext "\"Choose a File to Delete\"")
@@ -627,7 +635,7 @@ mainMenu(){
    choice4=$(gettext "Delete hard disk image")
    choice5=$(gettext "Help")
    choice6=$(gettext "Exit to command line terminal")
-   title=$(gettext "Main Menu")
+   title=$(gettext "MAIN MENU")
    msg=$(gettext "\n\nPlease choose from the following options:")
    ACTION=$(dialog --title "$title"  --ok-button Select --cancel-button quit --menu "$msg" 17 80 7   \
    "copysd" "$choice1" \
@@ -639,13 +647,21 @@ mainMenu(){
    3>&1 1>&2 2>&3)
    if test $? -ne 0 ; then exit 1 ; fi
    case "$ACTION" in
-      copysd) copySD
+      copysd) 
+         OBJECTIVE=$choice1
+         copySD
          ;;
-      smaller) makeSmaller
+      smaller) 
+         OBJECTIVE=$choice2
+         makeSmaller
          ;;
-      image2sd) image2SD
+      image2sd) 
+         OBJECTIVE=$choice3
+         image2SD
          ;;
-      delete) deleteImage
+      delete)
+         OBJECTIVE=$choice4
+         deleteImage
          ;;
       terminal)
          clear
