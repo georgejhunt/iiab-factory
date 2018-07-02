@@ -133,7 +133,7 @@ selectSource(){
    declare -a deviceList
    echo > /tmp/duper/src
    cat << EOF > /tmp/duper/src
-TITLE=$(gettext "\"CHOOSE SOURCE SD CARD-$OBJECTIVE\"")
+TITLE=$(gettext "\"CHOOSE SOURCE SD CARD -- $OBJECTIVE\"")
 MSG=$(gettext "\"Choose Source -- Probably a mmcblk device \n\n\n \\
 device            type        size      used       free     %       mounted to\n \\
 =================================================================================\"")
@@ -262,22 +262,6 @@ selectDestination(){
    fi
 }
 
-selectTruncate(){
-   # if the destination is much larger than source, let user select the smaller size
-   SIZE_DIFF=$(expr $DEST_SIZE - $SRC_SIZE)
-   # echo size_diff $SIZE_DIFF
-
-   QUESTION=$(gettext "Do you want to shrink the Source, even if it will fit without this step?")
-   QUERY=$(gettext "Minimize Source?")
-   dialog --title "$QUERY" --yesno "$QUESTION" 6 80
-   if test $? -eq 0; then
-      CHOSEN_SIZE=$MIN_SIZE
-   else
-      CHOSEN_SIZE=$SRC_SIZE
-   fi
-   return 0
-}
-
 ################### Identify the copy  #####################
 
 # Fetch username and appropriate label
@@ -286,15 +270,9 @@ createFilename(){
    SRC_PARTITION_NIBBLE=${SRC_PARTITION:5}
    SRC_MNT=/mnt/$SRC_PARTITION_NIBBLE
    DEST_MNT=$DEST_PARTITION_MOUNT
-   name=
-   if [ -f /opt/name ]; then
-      name=$(cat /opt/name)
-   fi
-   label=
-   if [ -f /opt/label ]; then
-      label=$(cat /opt/label)
-   fi
-   TITLE=$(gettext "Please identify this copy")
+   name=$(getPersistedVariable NAME)
+   label=$(getPersistedVariable LABEL)
+   TITLE=$(gettext "Please identify this copy -- $OBJECTIVE")
    MSG=$(gettext "Requires your name and short identifying label")
    exec 3>&1
    DATA=$(dialog --output-separator ":" --title "$TITLE" --form "$MSG" 10 80 3 \
@@ -307,26 +285,10 @@ createFilename(){
    # replace spaces with underscores
    NAME=$(echo $NAME | sed 's/ /_/g')
    LABEL=$(echo $LABEL | sed 's/ /_/g')
-   echo $LABEL > /opt/label
-   echo $NAME > /opt/name
-   iiab_label $SRC_PARTITION $NAME $LABEL
+   persistVariable NAME $NAME
+   persistVariable LABEL $LABEL
+   iiab_label $SRC_MNT $NAME $LABEL
    TARGET=$DEST_PARTITION_MOUNT/iiab/$(cat /tmp/duper/identifier_filename)
-   echo $TARGET > /opt/lapdup_filename
-   return 0
-}
-
-# check source is not open for running linux OS
-verifySourceNotBoot(){
-   BOOT_DEV=$(mount | grep -e boot -e rootfs | cut -d' ' -f1)
-   BOOT_DEV=${BOOT_DEV:0: (-1)}
-   #echo boot_dev=$BOOT_DEV
-   if [ "$BOOT_DEV" = "$SRC" ]; then
-       title=$(gettext "Error")
-       msg=$(gettext "Source cannot be the BOOT disk .. quitting")
-       echo $msg
-       dialog --title "$title"  --msgbox "$msg" 10 60 
-       return 99 
-   fi
    return 0
 }
 
@@ -341,40 +303,7 @@ willItFit(){
    fi
    return 0
 }
-save (){
-   if [ $(expr "$CHOSEN_SIZE" \< "$output_size") -eq 1 ] ; then
-     echo Chosen size:$CHOSEN_SIZE   output size:$output_size
-     msg=$(gettext "Truncation of Source is required. \n \
-      Source bytes: $CHOSEN_SIZE.   Destination bytes: $(bytesToHuman output_size) \n \
-      OK to proceed?")
-     human=$(bytesToHuman $CHOSEN_SIZE)
-     title=$(gettext "Proceed with resizing Source to $human? \
-     Both Source and Destination will be set to expand upon reboot")
-     dialog --title "$title"  --yesno "$msg" 10 70 
-     if test $? -ne 0 ; then return 99; fi fi
-}
-#####################  Confirm Choices     ###########################
-optionalTruncation(){
-   if [ "$SRC_SIZE" = "$CHOSEN_SIZE" ]; then
-      SOURCE_TRUNCATE=NO
-   else
-      SOURCE_TRUNCATE=YES
-   fi
 
-   if [ "$dest_is_usb" = "true" ]; then
-      DEST_INFO=$(gettext "Destination device: $DEST_DEVICE")
-   else
-      DEST_INFO=$(gettext "Destination filename: $TARGET")
-   fi
-
-   SRC_INFO=$(gettext "Source device: $SRC_DEVICE \
-   Source will be truncated before copy: $SOURCE_TRUNCATE" )
-   TITLE=$(gettext "Please Confirm the following COPY operation" )
-   MSG="$SOURCE_INFO\n$DEST_INFO"
-   dialog --Title "$TITLE" --yesno "$MSG" 7 70
-   if test $? -ne 0; then return 99; fi
-   return 0
-}
 #####################  Final Sanity Check  ###########################
 finalVerification(){
    if [ "$dest_is_file" != "true" ]; then
@@ -507,7 +436,7 @@ selectFile(){
    if test $? -ne 0; then return 99; fi
    TMP_FILE=/tmp/duper/copy2sd
    cat << EOF > "$TMP_FILE"
-   TITLE=$(gettext "Select Source Image")
+   TITLE=$(gettext "SELECT FILE -- $OBJECTIVE")
    MSG=$(gettext "Choose hard disk image to Copy to SD card")
 EOF
    image_path=$(selectImage $PARTITION/iiab $TMP_FILE )
@@ -522,7 +451,7 @@ selectSDDestinationgh(){
    echo > /tmp/duper/sddevice
    lsblk -o NAME,SIZE,TYPE  | grep disk | grep -v -e sdb -e sda -e zram0 | sort > /tmp/duper/scratch
    cat << EOF > /tmp/duper/sddevice
-TITLE=\$(gettext "\"Choose SD card as Destination\"")
+TITLE=\$(gettext "\"Choose SD card as Destination -- $OBJECTIVE\"")
 MSG=\$(gettext "\"Use care that you do not select the SD card you are copying from. \n\n\n \\
 device            size        mounted to\n \\
 =================================================================================\"")
@@ -563,7 +492,7 @@ makeSmaller(){
    local PARTITION=$(selectPartition /dev/$DEVICE_NIBBLE)
    if test $? -ne 0; then return 99; fi
    cat << EOF > "$TMP_FILE"
-   TITLE=$(gettext "\"Choose Image to make Smaller\"")
+   TITLE=$(gettext "\"Choose Image to make Smaller -- $OBJECTIVE\"")
    MSG=$(gettext "\"Must have unused space to be of much use\"")
 EOF
    image_path=$(selectImage  $PARTITION/iiab $TMP_FILE )
@@ -573,7 +502,7 @@ EOF
    human=$(bytesToHuman $new_size)
    current_size=$(ls -lh $image_path | awk '{print $5}')
    
-   TITLE=$(gettext "OK to proceed?")
+   TITLE=$(gettext "OK to proceed? -- $OBJECTIVE")
    MSG=$(gettext "The image file $image_path is currently $current_size. \n
 It's new size will be $human. Do you want to proceed?")
    
@@ -600,13 +529,13 @@ deleteImage(){
    PART_MOUNT=$(selectPartition )
    PART=$DEST_PARTiTION
    cat << EOF > $TMP_FILE
-   TITLE=$(gettext "\"Choose a File to Delete\"")
+   TITLE=$(gettext "\"Choose a File to Delete -- $OBJECTIVE\"")
    MSG=$(gettext "\"Highlight the file you wish to delete\"")
 EOF
    image_path=$(selectImage  $PART_MOUNT/iiab $TMP_FILE )
    if test $? -ne 0; then return 99; fi
 
-   TITLE=$(gettext "OK to proceed?")
+   TITLE=$(gettext "OK to proceed? -- $OBJECtIVE")
    MSG=$(gettext "The image file $image_path is about to be deleted. \
 Do you want to proceed?")
    

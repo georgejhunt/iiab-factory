@@ -111,36 +111,24 @@ ptable_size(){
 
 iiab_label(){
    if [ $# -ne 3 ];then
-      echo "requires parameters partition, username, labelstring"
+      echo "requires parameters iiab partition mount, username, labelstring"
       exit 1
    fi
    PARTITION=$1
    USER=$2
    LABEL=$3
-   mkdir -p /tmp/duper/sdcard
-   mount $PARTITION /tmp/duper/sdcard > /dev/null
-
-   if [ ! -d /tmp/duper/sdcard/opt/iiab/iiab ]; then
-     echo "Device is not IIAB root partition. Exiting."
-     exit 1
+   if [ ! -d $PARTITION/opt/iiab/iiab ]; then
+      echo "$PARTITION/opt/iiab/iiab does not exist. Exiting."
+      exit 1
    fi
 
    # create id for image
-   pushd /tmp/duper/sdcard/opt/iiab/iiab
+   pushd /$PARTITION/opt/iiab/iiab
    HASH=`git log --pretty=format:'g%h' -n 1`
-   YMD=$(date +%y%m%d)
+   YMD=$(date "+%y%m%d-%H%M")
    FILENAME=$(printf "%s-%s-%s-%s-%s-%s.img" $PRODUCT $VERSION $USER $LABEL $YMD $HASH)
-   echo $FILENAME > /tmp/duper/identifier_filename
-   echo $FILENAME > /tmp/duper/sdcard/.iiab-image
-   git branch >> /tmp/duper/sdcard/.iiab-image
-   git log -n 5 >> /tmp/duper/sdcard/.iiab-image
-   cat /tmp/duper/sdcard/duper/etc/rpi-issue >> /tmp/duper/sdcard/.iiab-image
-
-   echo $FILENAME > ../../last-filename
-   echo $HASH > ../../last-hash
+   persistVariable "LAST_FILENAME" $FILENAME
    popd
-   umount /tmp/duper/sdcard
-   rmdir /tmp/duper/sdcard
 }
 
 auto_expand(){
@@ -153,6 +141,17 @@ auto_expand(){
    umount /tmp/duper/sdcard
 }
 
+modifyImage(){
+   echo $FILENAME > /tmp/duper/identifier_filename
+   echo $FILENAME > /tmp/duper/sdcard/.iiab-image
+   git branch >> /tmp/duper/sdcard/.iiab-image
+   git log -n 5 >> /tmp/duper/sdcard/.iiab-image
+   cat /tmp/duper/sdcard/duper/etc/rpi-issue >> /tmp/duper/sdcard/.iiab-image
+
+   echo $FILENAME > ../../last-filename
+   echo $HASH > ../../last-hash
+
+}
 bytesToHuman() {
     b=${1:-0}; d=''; s=0; S=(Bytes {K,M,G,T,E,P,Y,Z}B)
     while ((b > 1024)); do
@@ -178,4 +177,6 @@ getPersistedVariable(){
    grep $1 $PERSIST_STATE_FILE
    if [ $? -eq 0 ]; then
       echo $(grep $1 $PERSIST_STATE_FILE | cut -d= -f2)
+   else
+      echo
    fi
