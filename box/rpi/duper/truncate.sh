@@ -123,12 +123,13 @@ iiab_label(){
    fi
 
    # create id for image
-   pushd /$PARTITION/opt/iiab/iiab
+   pushd /$PARTITION/opt/iiab/iiab > /dev/null
    HASH=`git log --pretty=format:'g%h' -n 1`
    YMD=$(date "+%y%m%d-%H%M")
    FILENAME=$(printf "%s-%s-%s-%s-%s-%s.img" $PRODUCT $VERSION $USER $LABEL $YMD $HASH)
    persistVariable "LAST_FILENAME" $FILENAME
-   popd
+   popd > /dev/null
+   echo $FILENAME
 }
 
 auto_expand(){
@@ -165,18 +166,19 @@ bytesToHuman() {
 persistVariable(){
    # Save name value pair $1 $2
    # see if it already exists
-   grep $1 $PERSIST_STATE_FILE
+   grep $1 $PERSIST_STATE_FILE > /dev/null
    if [ $? -eq 0 ]; then
       sed -i -e "s/^$1=.*/$1=$2/" $PERSIST_STATE_FILE
    else
-      (echo "$1=$2") >> $PERSIST_STATE_FiLE
+      (echo "$1=$2") >> $PERSIST_STATE_FILE
    fi
 }
 
 getPersistedVariable(){
-   grep $1 $PERSIST_STATE_FILE
+   grep ^$1 $PERSIST_STATE_FILE > /dev/null
    if [ $? -eq 0 ]; then
-      echo $(grep $1 $PERSIST_STATE_FILE | cut -d= -f2)
+      echo $(grep ^$1 $PERSIST_STATE_FILE | cut -d= -f2)
    else
       echo
    fi
+}

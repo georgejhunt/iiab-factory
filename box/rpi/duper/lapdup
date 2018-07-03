@@ -287,8 +287,8 @@ createFilename(){
    LABEL=$(echo $LABEL | sed 's/ /_/g')
    persistVariable NAME $NAME
    persistVariable LABEL $LABEL
-   iiab_label $SRC_MNT $NAME $LABEL
-   TARGET=$DEST_PARTITION_MOUNT/iiab/$(cat /tmp/duper/identifier_filename)
+   local target=$(iiab_label $SRC_MNT $NAME $LABEL)
+   TARGET=$DEST_PARTITION_MOUNT/iiab/$target
    return 0
 }
 
@@ -339,14 +339,9 @@ ddCopy(){
    if [ ! -e fifo ]; then
       mkfifo fifo
    fi
-   dd status=progress if="$SRC_DEVICE" of="$write_to" bs=4096 count=$WRITE_COUNT 2>>fifo &
-
-   # now read the fifo and update the gauge
-   lastcopied=
-   set +x
-   while true; do
-      sleep 5
-      line=$(tail -n1 fifo)
+   #set +x
+   dd status=progress if="$SRC_DEVICE" of="$write_to" bs=4096 count=$WRITE_COUNT 2>&1 | stdbuf -o0 tr "\015" "\n" | \   
+   while read -r line; do
       copied=$(echo $line | awk '{print $1}')
       if [ "$copied" = "$lastcopied" ]; then break; fi
       lastcopied=$copied
@@ -355,7 +350,8 @@ ddCopy(){
       echo $percent
       echo $line
       echo XXX 
-   done | dialog --title "Image writing" --gauge "Burning the image on the SD card..." 10 78 0
+  done | dialog --title "writing to $write_to" --gauge "Copying the image.. This may take some time ... " 10 78 0
+  set -x
 }
 
 get_nth(){
@@ -375,7 +371,7 @@ selectPartition(){
    local default=$(persistVariable PREFERRED_PARTITION $device)
    declare -n objective=$2
    if [ ! -z "$default" ]; then
-      DEFAULT="--default $default"
+      DEFAULT="--default-item $default"
    else
       DEFAULT=
    fi
