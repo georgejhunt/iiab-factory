@@ -34,6 +34,7 @@ declare WILLITFIT_DEST_SPEC
 declare DD_SRC
 declare DD_DEST
 declare PERSIST_STATE_FILE=/opt/duper/state
+declare dest_is_file
 
 # Persistence will be maintained for
 # User name, label, Laptop partition used by duper,
@@ -211,13 +212,15 @@ selectDevice(){
    # the source should not be listed as a potential destination
    echo > /tmp/duper/copyto
    cat << EOF > /tmp/duper/copyto
-      TITLE=$(gettext "\"Choose Destination -- $OBJECTIVE\"")
+      TITLE=$(gettext "\"CHOSE DEVICE -- $OBJECTIVE\"")
+      EXTRA=$(gettext "\"Storage Drive\"")
       MSG=$(gettext "\"Choose Destination -- Either hard disk partition of type ntfs, or another SD Card \n \\
       \$MIN_SIZE_TEXT  \n\n\n \\
                                device      size   \n \\
    =================================================================================\"")
-      DEST=\$(dialog --title "\$TITLE" --clear --ok-label "Select"  \\
-       --menu "\$MSG" 20 90 25    \\
+      DEST=\$(dialog --title "\$TITLE" --clear --ok-label "SD Card"  \\
+         --extra-button --extra-label "\$EXTRA" --default-button extra \\
+         --menu "\$MSG" 20 90 25    \\
 EOF
 
    devices=$(getDevicesList $deviceList)
@@ -232,26 +235,37 @@ EOF
    done ) >> /tmp/duper/copyto
    echo  "3>&1 1>&2 2>&3)" >> /tmp/duper/copyto
    source /tmp/duper/copyto
-   if test $? -ne 0 ; then return 99; fi
+   code=$?
+   case $code in
+      0)
+         dest_is_file="false"
+         ;;
+      3) 
+         dest_is_file="true"
+         ;;
+      *) 
+         exit 99
+         ;;
+   esac
+   #if test -ne 0 ; then return 99; fi
    DEST=$(echo "$DEST" | awk '{print $1;}')    # trim trailing spaces
    echo $DEST
 }
 
 selectDestination(){
-   DEST=$(selectDevice $OBJECTIVE)
+   selectDevice $OBJECTIVE
    DEST_DEVICE=/dev/$DEST
    DEST_SIZE=$(fdisk -l $DEST_DEVICE | grep Disk | cut -d" " -f 5)
    LAPTOP_DEVICE=/dev/$DEST
-   LAPTOP_MOUNT=/mnt/$DEST
-   LAPTOP_DIR=$LAPTOP_MOUNT/iiab
-   dest_is_file=
-   echo $DEST_DEVICE | grep $LAPTOP_DEVICE > /dev/null
-   # is 
-   if [ $? -eq 0 ];then
-      dest_is_file=true
+   echo dest_is_file:$dest_is_file
+   if [ "$dest_is_file" = "true" ]; then
       # pick the partition
-      DEST_PARTITION=$(selectPartition $DEST_DEVICE $OBJECTIVE)
-      DEST_PARTITION_MOUNT=/mnt/${DEST_PARTITION:5}
+      selectPartition $DEST_DEVICE $OBJECTIVE
+      DEST_PARTITION_MOUNT=/mnt/${PARTITION:5}
+
+      # PREFERRED_MOUNT is remembered for resize, delete, and copy image commands
+      PREFERRED_MOUNT=$DEST_PARTITiON_MOUNT
+      persistVariable "PREFERRED_MOUNT" $DEST_PARTITION_MOUNT
       if [ $? -ne 0 ]; then return 99; fi
       # trim the response
       DEST_PARTITiON=$(echo $DEST_PARTITION | awk '{print $1}')
@@ -315,8 +329,8 @@ finalVerification(){
    fi
   output_size=$(bytesToHuman $output_size)
   title=$(gettext "Final Verification")
-  msg=$(gettext "\n\nSource: $SRC_DEVICE  Bytes to copy: $(bytesToHuman $CHOSEN_SIZE)\n \
-                     Source device capacity: $(bytesToHuman $SRC_DEVICE_HOLDS)
+  msg=$(gettext "\n\nSource: $SRC_DEVICE  \nBytes to copy: $(bytesToHuman $CHOSEN_SIZE) \
+  \nSource device capacity: $(bytesToHuman $SRC_DEVICE_HOLDS)
   \n\nDestination: $write_to   \nSpace on Destination: $output_size")
   dialog --title "$title" --yesno "$msg" 20 80
   if test $? -ne 0 ; then return 99; fi
@@ -327,26 +341,25 @@ ddCopy(){
    if [ "$dest_is_file" != "true" ]; then
       write_to="$DEST_DEVICE"
    else
+      # writing to our hard disk
+      DEST_MNT=$(getPersistedVariable PREFERRED_MOUNT)
+      PART=/dev/${DEST_MNT:5}
+      # at boot, the read-only driver loads
+      umount $DEST_MNT
+      mount -t ntfs-3g "$PART" "$DEST_MNT"
       write_to="$TARGET"
       mkdir -p $(dirname $TARGET)
    fi
    # figure out how many 4K blocks to write
    WRITE_COUNT=$( echo "( $CHOSEN_SIZE / 4096 ) + 1" | bc )
 
-   # at boot, the read-only driver loads
-   umount $DEST_PARTITION
-   mount -t ntfs-3g "$DEST_PARTITION" "$DEST_MNT"
-   if [ ! -e fifo ]; then
-      mkfifo fifo
-   fi
-   #set +x
-   dd status=progress if="$SRC_DEVICE" of="$write_to" bs=4096 count=$WRITE_COUNT 2>&1 | stdbuf -o0 tr "\015" "\n" | \   
+   set +x
+   copied=9
+   dd status=progress if="$SRC_DEVICE" of="$write_to" bs=4096 count=$WRITE_COUNT 2>&1 | stdbuf -o0 tr "\015" '\n' | \
    while read -r line; do
-      copied=$(echo $line | awk '{print $1}')
-      if [ "$copied" = "$lastcopied" ]; then break; fi
-      lastcopied=$copied
-      percent=$(expr $copied \* 100 / $CHOSEN_SIZE) 
       echo XXX
+      copied=$(echo $line | awk '{print $1}')
+      percent=$(expr $copied \* 100 / $CHOSEN_SIZE) 
       echo $percent
       echo $line
       echo XXX 
@@ -368,7 +381,7 @@ get_nth(){
 
 selectPartition(){
    local device=$1
-   local default=$(persistVariable PREFERRED_PARTITION $device)
+   local default=$(persistVariable PREFERRED_MOUNT $device)
    declare -n objective=$2
    if [ ! -z "$default" ]; then
       DEFAULT="--default-item $default"
@@ -376,8 +389,8 @@ selectPartition(){
       DEFAULT=
    fi
    cat << EOF > /tmp/duper/partition
-   TITLE=$(gettext "Select Partition -- $OBJECTIVE")
-   MSG=$(gettext "Probably should pick the ntfs partition with the most free space")
+   TITLE=$(gettext "\"Select Partition -- $OBJECTIVE\"")
+   MSG=$(gettext "\"Probably should pick the ntfs partition with the most free space\"")
    PARTITION=\$(dialog --title "\$TITLE" --clear --ok-label "Select"  $DEFAULT \\
        --menu "\$MSG" 20 90 25    \\
 EOF
@@ -387,15 +400,11 @@ EOF
    echo  "3>&1 1>&2 2>&3)" >> /tmp/duper/partition
    source /tmp/duper/partition
    if test $? -ne 0 ; then return 99; fi
-   dest_is_file=true
-   echo $PARTITION
-
 }
 
 selectImage(){
    # called by selectFile, makeSmaller, deleteImage
    # returns full path selected
-   # updates SRC_MOUNT
    local TMP_FILE=$2
    declare -a lookup
    mkdir -p $(dirname $2)
@@ -419,23 +428,18 @@ EOF
 
    # trim the string
    CHOICE=$(echo $CHOICE | awk '{print $1}')
-   echo $PART_MOUNT/iiab/$(get_nth $CHOICE $image_list )
-   SRC_MOUNT=$PART_MOUNT
+   echo $1/$(get_nth $CHOICE $image_list )
 }
 
 selectFile(){
    # called by image2SD
-   local DEVICE_NIBBLE=$(selectDevice)
-   if test $? -ne 0; then return 99; fi
-   local DEVICE_MNT=/mnt/$DEVICE_NIBBLE
-   local PARTITION=$(selectPartition /dev/$DEVICE_NIBBLE)
-   if test $? -ne 0; then return 99; fi
    TMP_FILE=/tmp/duper/copy2sd
+   DEVICE_MOUNT=$(getPersistedVariable PREFERRED_MOUNT)
    cat << EOF > "$TMP_FILE"
    TITLE=$(gettext "SELECT FILE -- $OBJECTIVE")
    MSG=$(gettext "Choose hard disk image to Copy to SD card")
 EOF
-   image_path=$(selectImage $PARTITION/iiab $TMP_FILE )
+   image_path=$(selectImage $DEVICE_MOUNT/iiab $TMP_FILE )
    if test $? -ne 0; then return 99; fi
    SRC_DEVICE=$image_path
    SRC_FILE_SIZE=$(ptable_size $image_path)
@@ -482,16 +486,17 @@ copySD(){
 
 makeSmaller(){
    TMP_FILE=/tmp/duper/smaller
-   local DEVICE_NIBBLE=$(selectDevice)
-   if test $? -ne 0; then return 99; fi
-   local DEVICE_MNT=/mnt/$PART_NIBBLE
-   local PARTITION=$(selectPartition /dev/$DEVICE_NIBBLE)
-   if test $? -ne 0; then return 99; fi
+   DEST_MNT=$(getPersistedVariable PREFERRED_MOUNT)
+   PART=/dev/${DEST_MNT:5}
+   # at boot, the read-only driver loads
+   umount $DEST_MNT
+   mount -t ntfs-3g "$PART" "$DEST_MNT"
+
    cat << EOF > "$TMP_FILE"
    TITLE=$(gettext "\"Choose Image to make Smaller -- $OBJECTIVE\"")
    MSG=$(gettext "\"Must have unused space to be of much use\"")
 EOF
-   image_path=$(selectImage  $PARTITION/iiab $TMP_FILE )
+   image_path=$(selectImage  $DEST_MNT/iiab $TMP_FILE )
 
    # get the proposed new size
    new_size=$(min_device_size $image_path)
@@ -505,8 +510,8 @@ It's new size will be $human. Do you want to proceed?")
    dialog --title "$TITLE" --yesno "$MSG" 9 80
    if test $? -ne 0; then return 99; fi
 
-   size_image $image_path
-   return 99 
+   5ize_image $image_path
+   return 0 
 }
 
 image2SD(){
@@ -517,18 +522,23 @@ image2SD(){
    willItFit
    if test $? -ne 0; then return 99; fi
    finalVerification
-   # doDdCopy
+   if test $? -ne 0; then return 99; fi
+   ddCopy
 }
 
 deleteImage(){
    TMP_FILE=/tmp/duper/delete
-   PART_MOUNT=$(selectPartition )
-   PART=$DEST_PARTiTION
+   DEST_MNT=$(getPersistedVariable PREFERRED_MOUNT)
+   PART=/dev/${DEST_MNT:5}
+   # at boot, the read-only driver loads
+   umount $DEST_MNT
+   mount -t ntfs-3g "$PART" "$DEST_MNT"
+
    cat << EOF > $TMP_FILE
    TITLE=$(gettext "\"Choose a File to Delete -- $OBJECTIVE\"")
    MSG=$(gettext "\"Highlight the file you wish to delete\"")
 EOF
-   image_path=$(selectImage  $PART_MOUNT/iiab $TMP_FILE )
+   image_path=$(selectImage  $DEST_MNT/iiab $TMP_FILE )
    if test $? -ne 0; then return 99; fi
 
    TITLE=$(gettext "OK to proceed? -- $OBJECtIVE")
@@ -539,9 +549,6 @@ Do you want to proceed?")
    if test $? -ne 0; then return 99; fi
 
 
-   # at boot, the read-only driver loads
-   umount $PART_MOUNT
-   mount -t ntfs-3g "$PART" "$DEST_MNT"
    echo $image_path | grep iiab  # protection for total hard disk wipeout
    if [ $? -eq 0 ]; then
       rm -f $image_path

@@ -168,7 +168,7 @@ persistVariable(){
    # see if it already exists
    grep $1 $PERSIST_STATE_FILE > /dev/null
    if [ $? -eq 0 ]; then
-      sed -i -e "s/^$1=.*/$1=$2/" $PERSIST_STATE_FILE
+      sed -i -e "s|^$1=.*|$1=$2|" $PERSIST_STATE_FILE
    else
       (echo "$1=$2") >> $PERSIST_STATE_FILE
    fi
