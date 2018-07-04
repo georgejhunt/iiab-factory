@@ -170,19 +170,6 @@ EOF
    return 0
 }
 
-####  Get the minimun size that Destination must hold
-getSourceMinSize(){
-   # but first warn user that getting minimun source size will take a while
-   delay=$(gettext "Using e2fsck to check the minimum size of $SRC_PARTITION, This may take some time. . .")
-   dialog --infobox "$delay" 7 60
-
-   MIN_SIZE=$( min_device_size "$SRC_PARTITION" )  # keep it all in bytes
-   #echo minimum source size is $MIN_SIZE
-   MIN_SIZE_TEXT=$(gettext "Data on Source Sd card occupies $(bytesToHuman "$MIN_SIZE")")
-   echo $MIN_SIZE
-   return 0
-}
-
 ################  Choose Destination  ###################
 selectSDDestination(){
    echo > /tmp/duper/sddevice
@@ -261,6 +248,7 @@ selectDestination(){
    if [ "$dest_is_file" = "true" ]; then
       # pick the partition
       selectPartition $DEST_DEVICE $OBJECTIVE
+      if test $? -ne 0 ; then return 99; fi
       DEST_PARTITION_MOUNT=/mnt/${PARTITION:5}
 
       # PREFERRED_MOUNT is remembered for resize, delete, and copy image commands
@@ -353,13 +341,18 @@ ddCopy(){
    # figure out how many 4K blocks to write
    WRITE_COUNT=$( echo "( $CHOSEN_SIZE / 4096 ) + 1" | bc )
 
-   set +x
+
    copied=9
    dd status=progress if="$SRC_DEVICE" of="$write_to" bs=4096 count=$WRITE_COUNT 2>&1 | stdbuf -o0 tr "\015" '\n' | \
    while read -r line; do
-      echo XXX
       copied=$(echo $line | awk '{print $1}')
-      percent=$(expr $copied \* 100 / $CHOSEN_SIZE) 
+      if [ -z "$copied" ]; then 
+         copied=0; 
+         line=""
+      fi
+      percent=$(expr $copied \* 100 / $CHOSEN_SIZE) &> /dev/null
+      echo "copied: $copied  percent: $percent"
+      echo XXX
       echo $percent
       echo $line
       echo XXX 
@@ -400,6 +393,7 @@ EOF
    echo  "3>&1 1>&2 2>&3)" >> /tmp/duper/partition
    source /tmp/duper/partition
    if test $? -ne 0 ; then return 99; fi
+   PARTITION=$(echo $PARTITION | awk '{print $1}')
 }
 
 selectImage(){
@@ -434,7 +428,7 @@ EOF
 selectFile(){
    # called by image2SD
    TMP_FILE=/tmp/duper/copy2sd
-   DEVICE_MOUNT=$(getPersistedVariable PREFERRED_MOUNT)
+
    cat << EOF > "$TMP_FILE"
    TITLE=$(gettext "SELECT FILE -- $OBJECTIVE")
    MSG=$(gettext "Choose hard disk image to Copy to SD card")
@@ -445,27 +439,6 @@ EOF
    SRC_FILE_SIZE=$(ptable_size $image_path)
    WILLITFIT_SRC_SIZE=$SRC_FILE_SIZE
    CHOSEN_SIZE=$SRC_FILE_SIZE
-}
-
-selectSDDestinationgh(){
-   echo > /tmp/duper/sddevice
-   lsblk -o NAME,SIZE,TYPE  | grep disk | grep -v -e sdb -e sda -e zram0 | sort > /tmp/duper/scratch
-   cat << EOF > /tmp/duper/sddevice
-TITLE=\$(gettext "\"Choose SD card as Destination -- $OBJECTIVE\"")
-MSG=\$(gettext "\"Use care that you do not select the SD card you are copying from. \n\n\n \\
-device            size        mounted to\n \\
-=================================================================================\"")
-DEST=\$(dialog --title "\$TITLE" --clear --ok-label "Select"  \\
- --menu "\$MSG" 20 90 25    \\
-EOF
-   awk '{ printf("\"%-16s\"  \" %-10s\"  \\\n",$1,$2);}' /tmp/duper/scratch >> /tmp/duper/sddevice
-   echo  3\>\&1 1\>\&2 2\>\&3\) >> /tmp/duper/sddevice
-   error_msg=$(source /tmp/duper/sddevice)
-   if test $? -ne 0 ; then return 99; fi
-   DEST_DEVICE=/dev/$(echo $DEST | awk '{print $1}')
-   DEST_SIZE=$(fdisk -l $DEST_DEVICE | grep Disk | cut -d" " -f 5)
-   WILLITFIT_DEST_SIZE=$DEST_SIZE
-   dest_is_file=false
 }
 
 ################   Top Level Action Routines   ####################
@@ -510,12 +483,12 @@ It's new size will be $human. Do you want to proceed?")
    dialog --title "$TITLE" --yesno "$MSG" 9 80
    if test $? -ne 0; then return 99; fi
 
-   5ize_image $image_path
+   size_image $image_path
    return 0 
 }
 
 image2SD(){
-   selectFile   # source returned in CHOICE
+   selectFile 
    if test $? -ne 0; then return 99; fi
    selectSDDestination
    if test $? -ne 0; then return 99; fi

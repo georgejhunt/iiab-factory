@@ -25,8 +25,7 @@ min_device_size(){
    fi
    PARTITION=${DEVICEREF}p${LIBRARY_PARTITION}
 
-   PART_START_SECTOR=`parted -sm  $DEVICEREF unit s print|awk -F':' -v part=$LIBRARY_PARTITION  '{if($1 == part)print $2;}'`
-   root_start=${PART_START_SECTOR:0:-1}
+   root_start=$(fdisk -l $DEVICEREF | grep $PARTITION | awk '{print $2}')
 
    umount $PARTITION
    e2fsck -fy $PARTITION > /dev/null
@@ -53,8 +52,7 @@ size_image(){
    fi
    PARTITION=${DEVICEREF}p${LIBRARY_PARTITION}
 
-   PART_START_SECTOR=`parted -sm  $DEVICEREF unit s print|awk -v part="$LIBRARY_PARTITION" -F ":" '{if($1 == part)print $2;}'`
-   root_start=${PART_START_SECTOR:0: -1}
+   root_start=$(fdisk -l $DEVICEREF | grep $PARTITION | awk '{print $2}')
 
    # total prior sectors is 1 less than start of this one
    prior_sectors=$(( root_start - 1 ))
