@@ -66,7 +66,6 @@ size_image(){
    fi
    if [ $# -lt 2 ]; then
      block4k=`resize2fs -P $PARTITION | cut -d" " -f7`
-     block4k=$( echo "$block4k + 1 + $prior_sectors / 8 " | bc)
    else
      block4k=$(echo "$2 / 4096 " | bc )
    fi
@@ -88,9 +87,29 @@ size_image(){
    # resize root partition
    parted -s $DEVICEREF rm $LIBRARY_PARTITION
    parted -s $DEVICEREF unit s mkpart primary ext4 $root_start $root_end
-
    losetup -d $DEVICEREF
-   exit 0
+
+   copy_size=`echo "$blocks4k * 4096 + prior_sectors * 512" | bc`
+   copy4k=$(echo "($copy_size / 4096) + 1" | bc)
+   set +x
+   dd if=$1 of=$1.$$ bs=4096 count=$copy4k status=progress | \
+   while read -r line; do
+      copied=$(echo $line | awk '{print $1}')
+      if [ -z "$copied" ]; then 
+         copied=0; 
+         line=""
+      fi
+      percent=$(expr $copied \* 100 / $CHOSEN_SIZE) &> /dev/null
+      echo "copied: $copied  percent: $percent"
+      echo XXX
+      echo $percent
+      echo $line
+      echo XXX 
+   done | dialog --title "Writing a Smaller resized image" --gauge "Copying the image.. This may take some time ... " 10 78 0
+   set -x
+   if test $? -ne 0; then exit 1; fi
+   rm $1
+   mv $1.$$ $1
 }
 
 ptable_size(){
@@ -115,18 +134,24 @@ iiab_label(){
    PARTITION=$1
    USER=$2
    LABEL=$3
-   if [ ! -d $PARTITION/opt/iiab/iiab ]; then
-      echo "$PARTITION/opt/iiab/iiab does not exist. Exiting."
-      exit 1
+   local iiab=false
+   if [ -d $PARTITION/opt/iiab/iiab ]; then
+      iiab=true
    fi
 
    # create id for image
-   pushd /$PARTITION/opt/iiab/iiab > /dev/null
-   HASH=`git log --pretty=format:'g%h' -n 1`
+   if test "$iiab" = "true"; then
+      pushd /$PARTITION/opt/iiab/iiab > /dev/null
+      HASH=`git log --pretty=format:'g%h' -n 1`
+      popd > /dev/null
+   else
+      HASH="$$"
+      PRODUCT=LOCAL
+      VERSION="0.1"
+   fi
    YMD=$(date "+%y%m%d-%H%M")
    FILENAME=$(printf "%s-%s-%s-%s-%s-%s.img" $PRODUCT $VERSION $USER $LABEL $YMD $HASH)
    persistVariable "LAST_FILENAME" $FILENAME
-   popd > /dev/null
    echo $FILENAME
 }
 
