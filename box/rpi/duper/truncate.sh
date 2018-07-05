@@ -92,7 +92,7 @@ size_image(){
    copy_size=`echo "$blocks4k * 4096 + prior_sectors * 512" | bc`
    copy4k=$(echo "($copy_size / 4096) + 1" | bc)
    set +x
-   dd if=$1 of=$1.$$ bs=4096 count=$copy4k status=progress | \
+   dd if=$1 of=$1.$$ bs=4096 count=$copy4k status=progress 2>&1 | \
    while read -r line; do
       copied=$(echo $line | awk '{print $1}')
       if [ -z "$copied" ]; then 
