@@ -184,12 +184,9 @@ EOF
    (lsblk -o NAME,SIZE,TYPE  | grep disk | grep -v -e sdb -e sda -e zram0 | \
       awk '{ printf("\"%-16s\"  \" %-10s\"  \\\n",$1,$2);}' ) >> /tmp/duper/sddevice
    echo  3\>\&1 1\>\&2 2\>\&3\) >> /tmp/duper/sddevice
-   echo "echo \$DEST" >> /tmp/duper/sddevice
-   error_msg=$(source /tmp/duper/sddevice)
+   source /tmp/duper/sddevice
    if test $? -ne 0 ; then return 99; fi
-   DEST_NIBBLE=$(echo "$error_msg" | awk '{print $1}')
-   error_msg=
-   DEST_DEVICE=/dev/$DEST_NIBBLE
+   DEST_DEVICE=/dev/$DEST
    DEST_SIZE=$(fdisk -l $DEST_DEVICE | grep Disk | cut -d" " -f 5)
    WILLITFIT_DEST_SIZE=$DEST_SIZE
    dest_is_file=false
@@ -235,23 +232,22 @@ selectRepo(){
    dest_is_file=true
 
    # pick the partition
+   TITLE=$(gettext "\"Select Partition -- $OBJECTIVE\"")
+   MSG=$(gettext "\"Probably should pick the ntfs or fuseblk partition with the most free space\"")
    selectPartition $DEST_DEVICE $OBJECTIVE
    if test $? -ne 0 ; then return 99; fi
    DEST_PARTITION_MOUNT=/mnt/${PARTITION:5}
    # PREFERRED_MOUNT is remembered for resize, delete, and copy image commands
    PREFERRED_MOUNT=$DEST_PARTITION_MOUNT
    persistVariable "PREFERRED_MOUNT" $DEST_PARTITION_MOUNT
-   
-   cat << EOF > "$TMP_FILE"
-   TITLE=$(gettext "VERIFY HARD DISK DESTINATION -- $OBJECTIVE")
-   MSG=$(gettext "The new image file will be placed in this directory")
-EOF
-   image_path=$(selectImage $PREFERRED_MOUNT/iiab $TMP_FILE )
-   if test $? -eq 1; then return 99; fi
-   SRC_DEVICE=$image_path
-   SRC_FILE_SIZE=$(ptable_size $image_path)
-   WILLITFIT_SRC_SIZE=$SRC_FILE_SIZE
-   CHOSEN_SIZE=$SRC_FILE_SIZE
+
+   TITLE=$(gettext "VERIFY TARGET -- $OBJECTIVE")
+   MSG=$(gettext "\n\nThe new Image will be placed in this directory.")
+   selectImage $PREFERRED_MOUNT/iiab /tmp/dupeer/repo
+   if test $? -ne 0 ; then return 99; fi
+   DEST_PARTITION=$PARTITION
+   DEST_FREE=$(/usr/local/bin/df -l | grep $DEST_PARTITION | awk '{print $4}')
+   DEST_FREE=$(expr "$DEST_FREE" \* 1024)
 }
 
 ################### Identify the copy  #####################
@@ -374,8 +370,6 @@ selectPartition(){
       DEFAULT=
    fi
    cat << EOF > /tmp/duper/partition
-   TITLE=$(gettext "\"Select Partition -- $OBJECTIVE\"")
-   MSG=$(gettext "\"Probably should pick the ntfs partition with the most free space\"")
    PARTITION=\$(dialog --title "\$TITLE" --clear --ok-label "Select"  $DEFAULT \\
        --menu "\$MSG" 20 90 25    \\
 EOF
@@ -390,12 +384,12 @@ EOF
 
 selectImage(){
    # called by selectFile, makeSmaller, deleteImage
-   # returns full path selected in CHOICE
+   # returns full path selected in IMAGE
    local TMP_FILE=$2
    declare -a lookup
    mkdir -p $(dirname $TMP_FILE)
    cat << EOF > "$TMP_FILE"
-   CHOICE=\$(dialog --title "\$TITLE" --clear --ok-label "Select"  \\
+   CHOICE_NUM=\$(dialog --title "\$TITLE" --clear --ok-label "Select"  \\
     --menu "\$MSG" 20 90 25    \\
 EOF
    list=$(ls -l $1 | awk '{print $9}')
@@ -413,8 +407,8 @@ EOF
    if test $? -eq 1; then return 99; fi
 
    # trim the string
-   CHOICE=$(echo $CHOICE | awk '{print $1}')
-   echo $1/$(get_nth $CHOICE $image_list )
+   IMAGE=$(echo $IMAGE | awk '{print $1}')
+   IMAGE=$1/$(get_nth $CHOICE_NUM $image_list )
 }
 
 selectFile(){
@@ -426,8 +420,9 @@ selectFile(){
    TITLE=$(gettext "SELECT FILE -- $OBJECTIVE")
    MSG=$(gettext "Choose hard disk image to Copy to SD card")
 EOF
-   image_path=$(selectImage $DEVICE_MOUNT/iiab $TMP_FILE )
+   selectImage $DEVICE_MOUNT/iiab $TMP_FILE
    if test $? -ne 0; then return 99; fi
+   image_path=$IMAGE
    SRC_DEVICE=$image_path
    SRC_FILE_SIZE=$(ptable_size $image_path)
    WILLITFIT_SRC_SIZE=$SRC_FILE_SIZE
@@ -483,7 +478,9 @@ makeSmaller(){
    TITLE=$(gettext "\"Choose Image to make Smaller -- $OBJECTIVE\"")
    MSG=$(gettext "\"Must have unused space to be of much use\"")
 EOF
-   image_path=$(selectImage  $DEST_MNT/iiab $TMP_FILE )
+   selectImage  $DEST_MNT/iiab $TMP_FILE 
+   if test $? -ne 0; then return 99; fi
+   image_path=$IMAGE
 
    # get the proposed new size
    new_size=$(min_device_size $image_path)
@@ -530,14 +527,15 @@ deleteImage(){
    TITLE=$(gettext "\"Choose a File to Delete -- $OBJECTIVE\"")
    MSG=$(gettext "\"Highlight the file you wish to delete\"")
 EOF
-   image_path=$(selectImage  $DEST_MNT/iiab $TMP_FILE )
+   selectImage  $DEST_MNT/iiab $TMP_FILE 
    if test $? -ne 0; then return 99; fi
+   image_path=$IMAGE
 
    TITLE=$(gettext "OK to proceed? -- $OBJECtIVE")
    MSG=$(gettext "The image file $image_path is about to be deleted. \
 Do you want to proceed?")
    
-   dialog --title "$TITLE" --yesno "$MSG" 6 80
+   dialog --title "$TITLE" --defaultno --yesno "$MSG" 6 80
    if test $? -ne 0; then return 99; fi
 
 
