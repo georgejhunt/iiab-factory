@@ -228,6 +228,7 @@ EOF
 }
 
 selectRepo(){
+   TMP_FILE=/tmp/duper/destdir
    selectDevice $OBJECTIVE
    DEST_DEVICE=/dev/$DEST
    DEST_SIZE=$(fdisk -l $DEST_DEVICE | grep Disk | cut -d" " -f 5)
@@ -242,6 +243,186 @@ selectRepo(){
    persistVariable "PREFERRED_MOUNT" $DEST_PARTITION_MOUNT
    
    cat << EOF > "$TMP_FILE"
+   TITLE=$(gettext "VERIFY HARD DISK DESTINATION -- $OBJECTIVE")
+   MSG=$(gettext "The new image file will be placed in this directory")
+EOF
+   image_path=$(selectImage $PREFERRED_MOUNT/iiab $TMP_FILE )
+   if test $? -eq 1; then return 99; fi
+   SRC_DEVICE=$image_path
+   SRC_FILE_SIZE=$(ptable_size $image_path)
+   WILLITFIT_SRC_SIZE=$SRC_FILE_SIZE
+   CHOSEN_SIZE=$SRC_FILE_SIZE
+}
+
+################### Identify the copy  #####################
+
+# Fetch username and appropriate label
+createFilename(){
+   # generate mount specifiers
+   SRC_PARTITION_NIBBLE=${SRC_PARTITION:5}
+   SRC_MNT=/mnt/$SRC_PARTITION_NIBBLE
+   DEST_MNT=$DEST_PARTITION_MOUNT
+   name=$(getPersistedVariable NAME)
+   label=$(getPersistedVariable LABEL)
+   TITLE=$(gettext "Please identify this copy -- $OBJECTIVE")
+   MSG=$(gettext "Requires your name and short identifying label")
+   exec 3>&1
+   DATA=$(dialog --output-separator ":" --title "$TITLE" --form "$MSG" 10 80 3 \
+         "Name:" 1 1 "$name" 1 7 15 0 \
+         "Label:" 2  1 "$label" 2 7 16 0 \
+         2>&1 1>&3)
+   if test $? -ne 0 ; then return 99; fi
+   NAME=$(echo $DATA | awk -F: '{print $1;}')
+   LABEL=$(echo $DATA | awk -F: '{print $2;}')
+   # replace spaces with underscores
+   NAME=$(echo $NAME | sed 's/ /_/g')
+   LABEL=$(echo $LABEL | sed 's/ /_/g')
+   persistVariable NAME $NAME
+   persistVariable LABEL $LABEL
+   local target=$(iiab_label $SRC_MNT $NAME $LABEL)
+   if test $? -ne 0; then return 99; fi
+   TARGET=$DEST_PARTITION_MOUNT/iiab/$target
+   return 0
+}
+
+# verify that the copy of source will fit on destination
+willItFit(){
+   if [ $(expr "$WILLITFIT_SRC_SIZE" \> "$WILLITFIT_DEST_SIZE") -eq 1 ] ; then
+     MSG=$(gettext "The source $WILLITFIT_SRC_SPEC ($bytesToHuman($WILLITFIT_SRC_SIZE)) \
+  will not fit on the destination $WILLITFIT_DEST_SPEC" ($(bytesToHuman($WILLITFIT_DEST_SIZE))))
+     TITLE=$(gettext "Fatal ERROR . . . Quitting")
+     dialog --title "$TITLE"  --msgbox "$MSG" 10 70 
+     return 99 
+   fi
+   return 0
+}
+
+#####################  Final Sanity Check  ###########################
+finalVerification(){
+   if [ "$dest_is_file" != "true" ]; then
+      write_to="$DEST_DEVICE"
+      output_size="$DEST_SIZE"
+   else
+      write_to="$TARGET"
+      output_size="$DEST_FREE"
+   fi
+  output_size=$(bytesToHuman $output_size)
+  title=$(gettext "Final Verification")
+  msg=$(gettext "\n\nSource: $SRC_DEVICE  \nBytes to copy: $(bytesToHuman $CHOSEN_SIZE) \
+  \nSource device capacity: $(bytesToHuman $SRC_DEVICE_HOLDS)
+  \n\nDestination: $write_to   \nSpace on Destination: $output_size")
+  dialog --title "$title" --defaultno --yesno "$msg" 20 80
+  if test $? -ne 0 ; then return 99; fi
+}
+
+####################### copy the data #################################
+ddCopy(){
+   if [ "$dest_is_file" != "true" ]; then
+      write_to="$DEST_DEVICE"
+   else
+      # writing to our hard disk
+      DEST_MNT=$(getPersistedVariable PREFERRED_MOUNT)
+      PART=/dev/${DEST_MNT:5}
+      # at boot, the read-only driver loads
+      umount $DEST_MNT
+      mount -t ntfs-3g "$PART" "$DEST_MNT"
+      write_to="$TARGET"
+      mkdir -p $(dirname $TARGET)
+   fi
+   # figure out how many 4K blocks to write
+   WRITE_COUNT=$( echo "( $CHOSEN_SIZE / 4096 ) + 1" | bc )
+
+
+   set +x
+   copied=0
+   dd status=progress if="$SRC_DEVICE" of="$write_to" bs=4096 count=$WRITE_COUNT 2>&1 | stdbuf -o0 tr "\015" '\n' | \
+   while read -r line; do
+      copied=$(echo $line | awk '{print $1}')
+      if [ -z "$copied" ]; then 
+         copied=0; 
+         line=""
+      fi
+      percent=$(expr $copied \* 100 / $CHOSEN_SIZE) &> /dev/null
+      echo "copied: $copied  percent: $percent"
+      echo XXX
+      echo $percent
+      echo $line
+      echo XXX 
+  done | dialog --title "writing to $write_to" --gauge "Copying the image.. This may take some time ... " 10 78 0
+  set -x
+}
+
+get_nth(){
+   index=1
+   nth=$1
+   shift
+   choice_list=$@
+   for ch in $choice_list; do
+      if [ "$index" = "$nth" ]; then break; fi 
+      index=$(( index + 1 ))
+   done
+   echo $ch
+}
+
+selectPartition(){
+   local device=$1
+   local default=$(persistVariable PREFERRED_MOUNT $device)
+   declare -n objective=$2
+   if [ ! -z "$default" ]; then
+      DEFAULT="--default-item $default"
+   else
+      DEFAULT=
+   fi
+   cat << EOF > /tmp/duper/partition
+   TITLE=$(gettext "\"Select Partition -- $OBJECTIVE\"")
+   MSG=$(gettext "\"Probably should pick the ntfs partition with the most free space\"")
+   PARTITION=\$(dialog --title "\$TITLE" --clear --ok-label "Select"  $DEFAULT \\
+       --menu "\$MSG" 20 90 25    \\
+EOF
+   (df -hT | grep $device | \
+      awk ' { printf("\"%-16s\"  \"%-5s %10s %10s %10s %6s    %-15s\"  \\\n",$1,$2,$3,$4,$5,$6,$7);}' ) \
+      >> /tmp/duper/partition
+   echo  "3>&1 1>&2 2>&3)" >> /tmp/duper/partition
+   source /tmp/duper/partition
+   if test $? -ne 0 ; then return 99; fi
+   PARTITION=$(echo $PARTITION | awk '{print $1}')
+}
+
+selectImage(){
+   # called by selectFile, makeSmaller, deleteImage
+   # returns full path selected in CHOICE
+   local TMP_FILE=$2
+   declare -a lookup
+   mkdir -p $(dirname $TMP_FILE)
+   cat << EOF > "$TMP_FILE"
+   CHOICE=\$(dialog --title "\$TITLE" --clear --ok-label "Select"  \\
+    --menu "\$MSG" 20 90 25    \\
+EOF
+   list=$(ls -l $1 | awk '{print $9}')
+   index=1
+   for f in $list;do
+     size=$( ls -lh $1/$f | awk '{print $5}') 
+     (printf '\"%-2s\"  \"%-9s %-20s\" \\\n' $index $size $f) >> $TMP_FILE 
+     lookup[$index]=$f
+     index=$(( $index + 1 ))
+   done
+   image_list=${lookup[@]}
+   echo  3\>\&1 1\>\&2 2\>\&3\) >> $TMP_FILE
+
+   source "$TMP_FILE"
+   if test $? -eq 1; then return 99; fi
+
+   # trim the string
+   CHOICE=$(echo $CHOICE | awk '{print $1}')
+   echo $1/$(get_nth $CHOICE $image_list )
+}
+
+selectFile(){
+   # called by image2SD
+   TMP_FILE=/tmp/duper/copy2sd
+   DEVICE_MOUNT=$(getPersistedVariable PREFERRED_MOUNT)
+
+   cat << EOF > "$TMP_FILE"
    TITLE=$(gettext "SELECT FILE -- $OBJECTIVE")
    MSG=$(gettext "Choose hard disk image to Copy to SD card")
 EOF
@@ -254,15 +435,11 @@ EOF
 }
 
 ################   Top Level Action Routines   ####################
-copySD(){
+copy2SD(){
    selectSource
    if test $? -ne 0; then return 99; fi
    selectSDDestination
    if test $? -ne 0; then return 99; fi
-   if [  "$dest_is_file" = "true" ]; then
-      createFilename
-      if test $? -ne 0; then return 99; fi
-   fi
    willItFit
    if test $? -ne 0; then return 99; fi
    finalVerification
@@ -376,7 +553,7 @@ Do you want to proceed?")
 
 #######################   Main Menu   ###############################
 mainMenu(){
-   choice1=$(gettext "Copy to SD Card (DESTROYS ON TARGET)")
+   choice1=$(gettext "Copy to SD Card (DESTROYS ALL DATA ON TARGET)")
    choice1x=$(gettext "Copy to hard disk")
    choice2=$(gettext "Reduce the size of hard disk image")
    choice3=$(gettext "Copy from hard disk image to SD card")
@@ -398,7 +575,7 @@ mainMenu(){
    case "$ACTION" in
       copy2sd) 
          OBJECTIVE=$choice1
-         copySD
+         copy2SD
          ;;
       copy2disk) 
          OBJECTIVE=$choice1x
