@@ -5,6 +5,8 @@
 #Copyright George Hunt @ georgejhunt@gmail.com
 # attributioon James Camron http://dev.laptop.org/git/users/quozl/mktinycorexo/
 
+PERSIST=/root/cache/tce/optional
+mkdir -p $PERSIST
 if [ $(id -u) = "0" ]; then
    echo This script should be run as user tc
    exit 1
@@ -13,8 +15,10 @@ tce-load -wi dosfstools e2fsprogs
 
 efi=sdc2
 ext=sdc3
+work=sdc4
 sudo umount /mnt/$efi
 sudo umount /mnt/$ext
+sudo umount /mnt/$work
 
 sudo fdisk /dev/sdc << EOF
 d
@@ -22,6 +26,9 @@ d
 d
 
 d
+
+d
+
 
 n
 p
@@ -32,12 +39,17 @@ n
 p
 2
 
-+200M
++20M
 n
 p
 3
 
-+1G
++500M
+n
+p
+4
+
++50M
 t
 1
 4
@@ -53,8 +65,9 @@ EOF
 sleep 5
 sudo partprobe /dev/sdc
 
-sudo mke2fs -t ext2 -L tcore  -F /dev/$ext
 sudo mkfs.vfat /dev/$efi
+sudo mke2fs -t ext2 -L tcore  -F /dev/$ext
+sudo mke2fs -t ext2 -L data  -F /dev/$work
 
 uuid=$(blkid /dev/$ext | cut -d'"' -f4)
 echo $uuid
@@ -77,10 +90,10 @@ sudo mkdir -p /mnt/$ext/home
 
 pushd /mnt/$ext/boot
 sudo wget http://tinycorelinux.net/9.x/x86/release/distribution_files/vmlinuz
-sudo wget http://tinycorelinux.net/9.x/x86/release/distribution_files/vmlinuz64
+#sudo wget http://tinycorelinux.net/9.x/x86/release/distribution_files/vmlinuz64
 sudo wget http://tinycorelinux.net/9.x/x86/release/distribution_files/rootfs.gz
 sudo wget http://tinycorelinux.net/9.x/x86/release/distribution_files/modules.gz
-sudo wget http://tinycorelinux.net/9.x/x86/release/distribution_files/modules64.gz
+#sudo wget http://tinycorelinux.net/9.x/x86/release/distribution_files/modules64.gz
 popd
 
 sudo cp iiab.lst /mnt/$ext/tce/
@@ -93,3 +106,105 @@ if [ ! -d /mnt/$ext/opt/iiab/iiab-factory ]; then
       sudo git clone https://github.com/iiab/iiab-factory
    popd
 fi
+
+    # download tiny core extension
+    cat <<EOF > $PERSIST/tce/onboot.lst
+Xvesa.tcz
+aterm.tcz
+flwm_topside.tcz
+wbar.tcz
+flwm_topside.tcz
+wifi.tcz
+wl-modules-4.14.10-tinycore.tcz
+iw.tcz
+pci-utils.tcz
+firmware-atheros.tcz
+firmware-broadcom_bcm43xx.tcz
+firmware-broadcom_bnx2.tcz
+firmware-broadcom_bnx2x.tcz
+firmware-getB43.tcz
+firmware-ipw2100.tcz
+firmware-ipw2200.tcz
+firmware-iwimax.tcz
+firmware-iwl8000.tcz
+firmware-iwl9000.tcz
+firmware-iwlwifi.tcz
+firmware-marvel.tcz
+firmware-myri10ge.tcz
+firmware-netxen.tcz
+firmware-openfwwf.tcz
+firmware-ralinkwifi.tcz
+firmware-rtl8192ce_se_de.tcz
+firmware-rtlwifi.tcz
+firmware-ti-connectivity.tcz
+firmware-ueagle-atm.tcz
+firmware-vxge.tcz
+firmware-zd1211.tcz
+firmware.tcz
+git.tcz
+tree.tcz
+vim.tcz
+bash.tcz
+slocate.tcz
+grub2-multi.tcz
+dialog.tcz
+dosfstools.tcz
+util-linux.tcz
+openvpn.tcz
+gdisk.tcz
+gzip.tcz
+man.tcz
+nmap.tcz
+ntfs-3g.tcz
+coreutils.tcz
+bc.tcz
+flex.tcz
+nano.tcz
+ncurses.tcz
+ncurses-utils.tcz
+nss-mdns.tcz
+openssh.tcz
+parted.tcz
+rsync.tcz
+sed.tcz
+syslinux.tcz
+tar.tcz
+wget.tcz
+xz.tcz
+e2fsprogs.tcz
+ntfsprogs.tcz
+usbutils.tcz
+rsync.tcz
+grep.tcz
+appbrowser-cli.tcz
+EOF
+
+# wait for the new file to be available
+sync
+
+p_begin "Checking Tiny Core extensions ... "
+base=http://repo.tinycorelinux.net/${CORE_VERSION}
+cd $PERSIST/tce/optional
+flags="-q -c "
+for file in $(<${PERSIST}/tce/onboot.lst); do
+    if [ ! -f $file ]; then
+        wget ${flags} ${base}/${ARCH}/tcz/$file  \
+        wget ${flags} ${base}/${ARCH}/tcz/$file.md5.txt  \
+        wget ${flags} ${base}/${ARCH}/tcz/$file.dep  \
+        p_end "got $file"
+    else
+        if [ $CACHE = no ]; then
+            rm -f $file.md5.txt
+            wget ${flags} ${base}/${ARCH}/tcz/$file.md5.txt  
+            if [ "$(cat $file.md5.txt | cut -f 1 -d ' ')" \
+                != "$(md5sum $file | cut -f 1 -d ' ')" ]; then
+                rm -f $file{,.dep}
+                wget ${flags} ${base}/${ARCH}/tcz/$file  \
+                wget ${flags} ${base}/${ARCH}/tcz/$file.dep \
+                p_end "updated $file"
+            fi
+        fi
+    fi
+done
+p_end "ok"
+
