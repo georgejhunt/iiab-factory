@@ -5,7 +5,7 @@
 #Copyright George Hunt @ georgejhunt@gmail.com
 # attributioon James Camron http://dev.laptop.org/git/users/quozl/mktinycorexo/
 
-PERSIST=/opt/cache/tce/optional
+PERSIST=/opt/cache/tce
 ARCH=x86
 CORE_VERSION=9.x
 mkdir -p $PERSIST
@@ -125,8 +125,14 @@ if [ ! -d /mnt/$ext/opt/iiab/iiab-factory ]; then
    popd
 fi
 
+PERSIST=/opt/cache/tce
+sudo mkdir -p "$PERSIST/optional"
+ARCH=x86
+CORE_VERSION=9.x
+
+sudo chmod 775 -R "$PERSIST"
     # download tiny core extension
-    cat <<EOF > $PERSIST/tce/onboot.lst
+sudo cat <<EOF > "$PERSIST/onboot.lst"
 Xvesa.tcz
 aterm.tcz
 flwm_topside.tcz
@@ -198,27 +204,27 @@ appbrowser-cli.tcz
 EOF
 
 # wait for the new file to be available
-sync
+sudo sync
 
 p_begin "Checking Tiny Core extensions ... "
 base=http://repo.tinycorelinux.net/${CORE_VERSION}
-cd $PERSIST/tce/optional
+cd $PERSIST/optional
 flags="-q -c "
-for file in $(<${PERSIST}/tce/onboot.lst); do
+for file in $(<${PERSIST}/onboot.lst); do
     if [ ! -f $file ]; then
-        wget ${flags} ${base}/${ARCH}/tcz/$file  \
-        wget ${flags} ${base}/${ARCH}/tcz/$file.md5.txt  \
-        wget ${flags} ${base}/${ARCH}/tcz/$file.dep  \
+        sudo wget ${flags} ${base}/${ARCH}/tcz/$file  \
+        sudo wget ${flags} ${base}/${ARCH}/tcz/$file.md5.txt  \
+        sudo wget ${flags} ${base}/${ARCH}/tcz/$file.dep  \
         p_end "got $file"
     else
         if [ $CACHE = no ]; then
-            rm -f $file.md5.txt
-            wget ${flags} ${base}/${ARCH}/tcz/$file.md5.txt  
+            sudo rm -f $file.md5.txt
+            sudo wget ${flags} ${base}/${ARCH}/tcz/$file.md5.txt  
             if [ "$(cat $file.md5.txt | cut -f 1 -d ' ')" \
                 != "$(md5sum $file | cut -f 1 -d ' ')" ]; then
-                rm -f $file{,.dep}
-                wget ${flags} ${base}/${ARCH}/tcz/$file  \
-                wget ${flags} ${base}/${ARCH}/tcz/$file.dep \
+                sudo rm -f $file{,.dep}
+                sudo wget ${flags} ${base}/${ARCH}/tcz/$file  \
+                sudo wget ${flags} ${base}/${ARCH}/tcz/$file.dep \
                 p_end "updated $file"
             fi
         fi
@@ -226,5 +232,5 @@ for file in $(<${PERSIST}/tce/onboot.lst); do
 done
 p_end "ok"
 
-cp -rp $PERSIST/tct/optional/* /mnt/$ext/tce/optional/
+sudo cp -rp $PERSIST/optional/* /mnt/$ext/tce/optional/
 
