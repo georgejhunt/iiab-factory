@@ -1,11 +1,13 @@
 #!/bin/bash -x
-# Create a USB stick to double boot in 32bit and 64bit tiny core linux
+# Create a USB stick to double boot in 32bit (maybe 64bit) tiny core linux
 # For the purpose of duplicating rpi SD cards on a windows laptop
 
 #Copyright George Hunt @ georgejhunt@gmail.com
 # attributioon James Camron http://dev.laptop.org/git/users/quozl/mktinycorexo/
 
-PERSIST=/root/cache/tce/optional
+PERSIST=/opt/cache/tce/optional
+ARCH=x86
+CORE_VERSION=9.x
 mkdir -p $PERSIST
 if [ $(id -u) = "0" ]; then
    echo This script should be run as user tc
@@ -19,6 +21,22 @@ work=sdc4
 sudo umount /mnt/$efi
 sudo umount /mnt/$ext
 sudo umount /mnt/$work
+
+function p_begin {
+    if [ "$COLOUR" = "yes" ]; then
+        echo -ne "\e[1;96m$1\e[0;39m"
+    else
+        echo -n "$1"
+    fi
+}
+
+function p_end {
+    if [ "$COLOUR" = "yes" ]; then
+        echo -e "\e[1;92m$1\e[0;39m"
+    else
+        echo "$1"
+    fi
+}
 
 sudo fdisk /dev/sdc << EOF
 d
@@ -207,4 +225,6 @@ for file in $(<${PERSIST}/tce/onboot.lst); do
     fi
 done
 p_end "ok"
+
+cp -rp $PERSIST/tct/optional/* /mnt/$ext/tce/optional/
 

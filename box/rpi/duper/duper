@@ -329,7 +329,7 @@ ddCopy(){
    WRITE_COUNT=$( echo "( $CHOSEN_SIZE / 4096 ) + 1" | bc )
 
 
-   set +x
+   #set +x
    copied=0
    dd status=progress if="$SRC_DEVICE" of="$write_to" bs=4096 count=$WRITE_COUNT 2>&1 | stdbuf -o0 tr "\015" '\n' | \
    while read -r line; do
