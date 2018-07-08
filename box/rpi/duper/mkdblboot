@@ -205,30 +205,39 @@ EOF
 
 # wait for the new file to be available
 sudo sync
+get_tce_file(){
+    if [ ! -f $1 ]; then
+        sudo wget ${flags} ${base}/${ARCH}/tcz/$1  \
+        sudo wget ${flags} ${base}/${ARCH}/tcz/$1.md5.txt  \
+        sudo wget ${flags} ${base}/${ARCH}/tcz/$1.dep  \
+	for dep in `cat $1.dep`; do
+ 		get_tce_file $dep
+	done
+        p_end "got $file"
+    else
+        if [ $CACHE = no ]; then
+            sudo rm -f $1.md5.txt
+            sudo wget ${flags} ${base}/${ARCH}/tcz/$1.md5.txt  
+            if [ "$(cat $1.md5.txt | cut -f 1 -d ' ')" \
+                != "$(md5sum $1 | cut -f 1 -d ' ')" ]; then
+                sudo rm -f $1{,.dep}
+                sudo wget ${flags} ${base}/${ARCH}/tcz/$1  \
+                sudo wget ${flags} ${base}/${ARCH}/tcz/$1.dep \
+		for dep in `cat $1.dep`; do
+			get_tce_file $dep
+		done
+                p_end "updated $1"
+            fi
+        fi
+    fi
+}
 
 p_begin "Checking Tiny Core extensions ... "
 base=http://repo.tinycorelinux.net/${CORE_VERSION}
 cd $PERSIST/optional
 flags="-q -c "
 for file in $(<${PERSIST}/onboot.lst); do
-    if [ ! -f $file ]; then
-        sudo wget ${flags} ${base}/${ARCH}/tcz/$file  \
-        sudo wget ${flags} ${base}/${ARCH}/tcz/$file.md5.txt  \
-        sudo wget ${flags} ${base}/${ARCH}/tcz/$file.dep  \
-        p_end "got $file"
-    else
-        if [ $CACHE = no ]; then
-            sudo rm -f $file.md5.txt
-            sudo wget ${flags} ${base}/${ARCH}/tcz/$file.md5.txt  
-            if [ "$(cat $file.md5.txt | cut -f 1 -d ' ')" \
-                != "$(md5sum $file | cut -f 1 -d ' ')" ]; then
-                sudo rm -f $file{,.dep}
-                sudo wget ${flags} ${base}/${ARCH}/tcz/$file  \
-                sudo wget ${flags} ${base}/${ARCH}/tcz/$file.dep \
-                p_end "updated $file"
-            fi
-        fi
-    fi
+   get_tce_file $file
 done
 p_end "ok"
 
