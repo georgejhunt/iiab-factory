@@ -1,0 +1,151 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the PACKAGE package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: PACKAGE VERSION\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2018-08-06 10:10-0700\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=CHARSET\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: imager:59
+msgid "-s"
+msgstr ""
+
+#: imager:179
+msgid "ERROR"
+msgstr ""
+
+#: imager:187
+msgid ""
+"The device chosen does not appear to contain an IIAB image, or a readable "
+"ini File"
+msgstr ""
+
+#: imager:211
+msgid ""
+"\\nThis file is updated when the IIAB Admin Console is used                 "
+"\\nto modify the conriguration of Internet In A Box"
+msgstr ""
+
+#: imager:229
+msgid ""
+"\"\\n\\nChoose Source -- Probably a mmcblk device \\      \\n\\n"
+"\\nSuggestion: If you are uncertain about the names of the devices; \\      "
+"\\nRemove the device that you want to use as destination, and repeat \\      "
+"\\nthis menu item.\\n \\      \\nOr highlight a device, and tab to the < "
+"info > button \\n\\n \\          device    size   vendor               "
+"model   \\      "
+"\\n========================================================================="
+"\""
+msgstr ""
+
+#: imager:282
+msgid "\"Choose SD card as Destination\""
+msgstr ""
+
+#: imager:283
+msgid ""
+"\"If you have not removed the source SD card, and replaced it with a blank "
+"SD, \\ndo not select mmcblk0.. \\n\\n\\n \\      device    size        type "
+"\\      "
+"\\n========================================================================"
+msgstr ""
+
+#: imager:331
+#, sh-format
+msgid ""
+"\"Choose Destination -- Either hard disk partition of type ntfs, or "
+"fuseblock. \\n \\      $MIN_SIZE_TEXT  \\n\\n\\n "
+"\\                               device      size   \\n \\   "
+"================================================================================="
+"\""
+msgstr ""
+
+#: imager:376
+msgid ""
+"\"\\nThe new Image will be placed in this directory along with these files\""
+msgstr ""
+
+#: imager:414
+msgid "Requires your name and short identifying label"
+msgstr ""
+
+#: imager:443
+msgid "Fatal ERROR . . . Quitting"
+msgstr ""
+
+#: imager:500
+msgid "Final Verification"
+msgstr ""
+
+#: imager:513
+msgid "Checking file system that was just copied"
+msgstr ""
+
+#: imager:514
+msgid "An error at this point might indicate a bad SD card"
+msgstr ""
+
+#: imager:623
+msgid ""
+"\"Probably should pick the ntfs or fuseblk partition with the most free "
+"space \\      \\n\\n   device    type           size       used      free    "
+"%    mounted at   \\      "
+"\\n========================================================================="
+"\""
+msgstr ""
+
+#: imager:652
+msgid "\"Choose hard disk image to Copy to SD card\""
+msgstr ""
+
+#: imager:849
+msgid "There are no images to delete"
+msgstr ""
+
+#: imager:892
+msgid "Copy to SD Card (DESTROYS ALL DATA ON TARGET)"
+msgstr ""
+
+#: imager:893
+msgid "Copy to hard disk"
+msgstr ""
+
+#: imager:894
+msgid "Reduce the size of hard disk image"
+msgstr ""
+
+#: imager:895
+msgid "Copy from hard disk image to SD card"
+msgstr ""
+
+#: imager:896
+msgid "Delete hard disk image"
+msgstr ""
+
+#: imager:897
+msgid "Help"
+msgstr ""
+
+#: imager:898
+msgid "Exit to command line terminal"
+msgstr ""
+
+#: imager:899
+msgid "MAIN MENU"
+msgstr ""
+
+#: imager:900
+msgid ""
+"\\nIMAGER = Disk Image Copier\\n\\nPlease choose from the following options:"
+msgstr ""
