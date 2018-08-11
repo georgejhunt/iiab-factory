@@ -931,7 +931,9 @@ mainMenu(){
          ;;
       help)
          OBJECTIVE=$choice5
-         dillo file:///opt/iiab/iiab-factory/box/rpi/imager/docs/README.html
+         help_title=$(gettext "HELP")
+         dialog --title "$help_title" --textbox  \
+            "/opt/iiab/iiab-factory/box/rpi/imager/docs/USAGE.md" 30 80
          ;;
       terminal)
          dialog --title "Exit to terminal" --msgbox "Thank you for using IMAGER\n\nIf you wish to return to the IMAGER application. . .\nOpen a terminal, and type \"imager\"." 10 80
