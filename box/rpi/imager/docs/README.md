@@ -1,8 +1,8 @@
-## How to Get Started -- Create Imager on USB 
+## How to Get Started -- Create Imager on a USB Stick
 * Download the most recent IMAGER from http://download.iiab.io/packages/imager/. Depending on the speed of your internet, this could take a while.
 * On Windows:
     * After the download completes, on Windows, use the filemanager to find the downloaded file, right click on the < filename >.img.zip file, and select "extract all files".
-    * On Windows, use https://etcher.io/ or https://sourceforge.net/projects/win32diskimager/ to write the downloaded image file to a USB stick (all data will be lost)
+    * On Windows, use [https://etcher.io/](https://etcher.io/) or [https://sourceforge.net/projects/win32diskimager/](https://sourceforge.net/projects/win32diskimager/) to write the downloaded image file to a USB stick (all data will be lost)
 * On a MAC:
     * IMAGER has not yet been verified to function correctly on a MAC.
 
@@ -13,4 +13,4 @@
     * Put the USB stick into the machine, and turn on the power.
 * On a MAC:
     * Hold down the "option" key, during the power-on sequence.
-* After a short time you should see the colorful boot process of Tiny Core Linux, and eventually the IMAGER menu as shown at https://github.com/georgejhunt/iiab-factory/tree/fixes/box/rpi/imager/docs/USAGE.md.
+* After a short time you should see the colorful boot process of Tiny Core Linux, and eventually the IMAGER menu as shown at [https://github.com/georgejhunt/iiab-factory/tree/fixes/box/rpi/imager/docs/USAGE.md](https://github.com/georgejhunt/iiab-factory/tree/fixes/box/rpi/imager/docs/USAGE.md).
