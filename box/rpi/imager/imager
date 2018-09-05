@@ -202,7 +202,7 @@ showIni(){
    local si_title=$(gettext "IIAB Information File -- $OBJECTIVE")
    si_msg=$(gettext "\nThis file is updated when the IIAB Admin Console is used \
                 \nto modify the conriguration of Internet In A Box")
-   if [ -r "$ROOTFS_MOUNT/etc/iiab/iiab.ini" ]; then
+   if [ -r "$rootfs_mnt/etc/iiab/iiab.ini" ]; then
       dialog --title "$si_title" --textbox  "$rootfs_mnt/etc/iiab/iiab.ini" 30 80
    else
       notIiab
@@ -246,9 +246,11 @@ EOF
       SRC_DEVICE=/dev/$SRC_NIBBLE
       case $rtn in
          3) 
-            SOURCE_PARTITION_MOUNT=/mnt/${SRC_NIBBLE}2
-            mount $SRC_DEVICE}2 $SOURCE_PARTITION_MOUNT 
-            showIni $SOURCE_PARTITIOON_MOUNT
+            part=
+            if [ ${SRC_NIBBLE:0:6} = "mmcblk" ]; then part='p';fi
+            SOURCE_PARTITION_MOUNT=/mnt/${SRC_NIBBLE}${part}2
+            mount ${SRC_DEVICE}${part}2 $SOURCE_PARTITION_MOUNT 
+            showIni $SOURCE_PARTITION_MOUNT
             umount $SOURCE_PARTITION_MOUNT
             continue
             ;;
