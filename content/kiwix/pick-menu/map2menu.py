@@ -18,7 +18,7 @@ ICON_BASE = "/library/www/html/js-menu/menu-files/images"
 ASSET_BASE = "/library/www/html/common/assets"
 KIWIX_CAT = ASSET_BASE + '/kiwix_catalog.json'
 DOWNLOADED_ZIMS = ASSET_BASE + '/zim_version_idx.json'
-MAPPING = ASSET_BASE + '/module2item.json'
+MAPPING = ASSET_BASE + '/map2menu.json'
 
 os.chdir(MENU_BASE)
 
