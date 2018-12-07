@@ -18,6 +18,7 @@ ICON_BASE = "/library/www/html/js-menu/menu-files/images"
 ASSET_BASE = "/library/www/html/common/assets"
 KIWIX_CAT = ASSET_BASE + '/kiwix_catalog.json'
 DOWNLOADED_ZIMS = ASSET_BASE + '/zim_version_idx.json'
+MAPPING = ASSET_BASE + '/module2item.json'
 
 os.chdir(MENU_BASE)
 
@@ -45,7 +46,6 @@ if not conn:
        print("failed to open mysql database")
        sys.exit(1)
 c = conn.cursor()
-"""
 c.execute('truncate menus')
 
 # ########## Transfer the values  ##############
@@ -72,7 +72,8 @@ for filename in os.listdir('.'):
                    except MySQLdb.Error as e:
                      print str(e)
                      print sql
-                          
+conn.commit()
+"""  we do not need the json as an encoded string            
              instr = ''
              lines = reads.split('\n')
              for line in lines:
@@ -154,6 +155,7 @@ with open(KIWIX_CAT, 'r') as kiwix_cat:
                print sql
 
    conn.commit()
+
 """
 # read throug the downloaded zim versions and print out the menu names
 with open(DOWNLOADED_ZIMS, 'r') as down_fp:
@@ -170,5 +172,7 @@ with open(DOWNLOADED_ZIMS, 'r') as down_fp:
    outstr = outstr[:-2]
    outstr += '\n'
    outstr += '}'
-   print outstr
+with open(MAPPING,'w') as outfile:
+   outfile.write(outstr)
+   outfile.close()
 conn.close()

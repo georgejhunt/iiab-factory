@@ -1,0 +1,7 @@
+#!/bin/bash
+# return the menu_item_name for specified and downloaded zim-name
+if [ $# -eq 2 && "$2" == 'html' ]; then
+   echo $1
+else
+   cat /library/www/html/common/assets/module2item.json | grep $1 | cut -d'"' -f4
+fi
