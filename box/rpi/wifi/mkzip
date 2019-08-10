@@ -1,0 +1,4 @@
+#!/bin/bash -x
+# create a zip file to initialize rpi image (put in boot)
+zip wifi.zip ./ssh ./ap-wifi-gw ./wpa_supplicant.conf readme.md
+
