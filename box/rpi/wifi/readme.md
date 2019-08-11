@@ -7,7 +7,7 @@
 5. Unzip the zip file to the root directory of SD (windows will not by default put it in the root of SD).
 6. Open the new file wpa_supplicant.conf, and change the ssid and password to the correct values for your upstream AP.
 7. Reboot.
-8. If not already done, install https://download.info.apple.com/Mac_OS_X/061-8098.20100603.gthyu/BonjourPSSetup.exe.
+8. If not already done, and if you are using windows, install https://download.info.apple.com/Mac_OS_X/061-8098.20100603.gthyu/BonjourPSSetup.exe
 9. Use putty, or ssh (if on a mac or linux) to connect to raspberrypi.local.
 10. Once connected to the RPI, execute "sudo /boot/ap-wifi-gw
 11. Reboot
