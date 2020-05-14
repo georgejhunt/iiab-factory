@@ -46,3 +46,7 @@
       dest: '{{ doc_root }}/info/videos/'
       src: '{{ doc_root }}/info/videos/videos.zip'
       creates:  '{{ doc_root }}/info/videos/group4-Rpi'
+
+- name: Run the python which creates the menu-defs for admin-console
+  command: /opt/iiab/iiab-factory/ansible/roles/player/files/iiab-videos-update.py
+     
