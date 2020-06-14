@@ -24,6 +24,8 @@ systemctl disable openvpn
 rm -rf /root/tools
 rm -f /root/.netrc
 rm -f /root/id_rsa
+rm -f /etc/ssh/ssh_host*
+
 if [ "$PLATFORM" == 'raspbian' ]; then
    cp -f ../rpi/pibashrc /root/.bashrc
    
