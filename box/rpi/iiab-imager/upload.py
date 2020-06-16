@@ -211,24 +211,31 @@ def upload_image(archive_md):
       status = 'error'
       with open('./logs/archive_org.log','a+') as ao_fp:
          ao_fp.write("Exception from internetarchive:%s"%e) 
-   with open('./archive_org.log','a+') as ao_fp:
+   with open('%s/archive_org.log'%repo_prefix,'a+') as ao_fp:
       now = datetime.now()
       date_time = now.strftime("%m/%d/%Y, %H:%M:%S")
       ao_fp.write('Uploaded %s at %s Status:%s\n'%(args.image_name + '.zip',date_time,status))
 
-def get_os_list(experimental):
-   global imager_menu
+def get_json_filename(experimental):
    imager_menu = "subitems"
    if experimental:
       imager_menu = 'experimental'
-   json_filename_suffix = os.path.join('os_list_imagingutility_iiab_' + imager_menu + '.json')
-   json_filename = os.path.join(repo_prefix,json_filename_suffix)
+   return os.path.join(repo_prefix,'os_list_imagingutility_iiab_' + imager_menu + '.json')
+
+def get_os_list(experimental):
+   global imager_menu
+   json_filename = get_json_filename(experimental)
    #print('json_filename:%s'%json_filename)
    #pdb.set_trace()
    try:
       with open(json_filename,'r') as fp:
          json_str = fp.read()
          data = json.loads(json_str)
+         # following 3 lines are cludge to change string to int
+         for index in range(len(data['os_list'])):
+            #pdb.set_trace()
+            data['os_list'][index]['extract_size'] = int(data['os_list'][index]['extract_size'])
+            data['os_list'][index]['image_download_size'] = int(data['os_list'][index]['image_download_size'])
    except FileNotFoundError as e:
       print(json_filename)
       print("File not found: %s"%e)
@@ -312,7 +319,7 @@ def do_rpi_imager():
    data['os_list'].insert(0,imager_md)
 
    # and write it
-   fname = os.path.join(repo_prefix,json_filename_suffix)
+   fname = get_json_filename(args.experimental)
    with open (fname,'w') as fp:
       json.dump(data,fp,indent=2)
 
@@ -370,7 +377,7 @@ def main():
    args = parse_args()
    if args.save:
       save(repo_prefix +'/logs')
-      print("The following menu items were saved.d")
+      print("The following menu items were saved.")
       print_os_list()
       sys.exit(0)
    if args.restore:
@@ -386,6 +393,8 @@ def main():
       sys.exit(0)
    if not os.path.isfile(args.image_name):
       print(args.image_name + " not found in the current directory: %s"%os.getcwd())
+      if args.image_name == '':
+         print("You must specify an Image file to upload to archive.org")
       sys.exit(1)
    if args.image_name.endswith('.zip'):
       args.image_name = args.image_name[:-4]

@@ -1,6 +1,17 @@
 {
   "os_list": [
     {
+      "name": "Desktop Rpi OS -- IIAB 7.1 Medium",
+      "description": "Frequently Selected IIAB Services with Graphical User Interface (GUI)",
+      "extract_size": 11075993600,
+      "extract_sha256": "8a228a3300e714f6a4b7a76f26274e3c845047494ed8f5fd610a55c7d37c845a",
+      "image_download_size": 4128100390,
+      "release_date": "06/15/2020",
+      "zip.md5": "7d8ee53f3ee63be8826abedebeca1cab",
+      "url": "https://archive.org/download/iiab-7.1-200614-raspberry-pi-os-desktop-g17253d4.img.zip/iiab-7.1-200614-raspberry-pi-os-desktop-g17253d4.img.zip",
+      "icon": "https://raw.githubusercontent.com/iiab/iiab-factory/master/box/rpi/rpi-imager/iiab40.png"
+    },
+    {
       "name": "IIAB PRE 7.1 Minimum Version Content Ready",
       "description": "Internet in a Box with minimal services ready to have content added.",
       "url": "https://archive.org/download/iiab-PRE7.1-200315-min-content-ready-2020-02-13-raspbian-lite-g1b4f928.img/iiab-PRE7.1-200315-min-content-ready-2020-02-13-raspbian-lite-g1b4f928.img.zip",
