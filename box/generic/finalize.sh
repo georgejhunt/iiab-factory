@@ -14,9 +14,8 @@ fi
 
 # place developers' keys enabling remote access which becomes root with sudo su
 mkdir -p /home/iiab-admin/.ssh
-cp -f ../keys/developers_authorized_keys /home/iiab-admin/.ssh/authorized_keys
-chown iiab-admin:iiab-admin /home/iiab-admin/.ssh/authorized_keys
-chmod 640 /home/iiab-admin/.ssh/authorized_keys
+chmod 600 /home/iiab-admin/.ssh
+rm -f /home/iiab-admin/.ssh/*
 
 # remove any aliases we might have added
 rm -f /root/.bash_aliases
@@ -30,12 +29,14 @@ systemctl disable openvpn
 rm -rf /root/tools
 rm -f /root/.netrc
 if [ "$PLATFORM" == 'raspbian' ]; then
+   rm -f /etc/ssh/ssh_host*
    cp -f ../rpi/pibashrc /root/.bashrc
    echo -e g0adm1n\ng0adm1n | passwd iiab-admin
    echo -e raspberry\nraspberry | passwd pi
    
    # if hostkeys are missing, recreate them and restart sshd
-   if [ ! -f /etc/ssh/ssh_host_rsa_key.pub ]; then
+   grep ssh-keygen /etc/rc.local
+   if [ $? -ne 0 ]; then
       sed '/^exit.*/i ssh-keygen -A\nsystemctl restart sshd' /etc/rc.local
    fi
 fi
