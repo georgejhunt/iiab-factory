@@ -16,7 +16,11 @@ if [ $# -eq 0 ]; then
    exit 1
 fi
 
-source /opt/iiab/iiab-factory/factory-settings
+if [ ! -f ./factory-settings ]; then
+   echo Need a factory-settings fine in this directory
+   exit 1
+fi
+source ./factory-settings
 
 FILENAME=$1.img
 

@@ -1,6 +1,17 @@
 {
   "os_list": [
     {
+      "name": "Full Desktop Big IIAB",
+      "description": "IIAB 7.2 (Oct 2020) loaded onto Rasberry Pi OS Full Desktop -- Everything Maximum",
+      "extract_size": 17348542464,
+      "extract_sha256": "c5e04092fbb2a7df168fd221aca4b6dfba320c1686019dfe9fe961e51d989532",
+      "image_download_size": 7385116002,
+      "release_date": "10/28/2020",
+      "zip.md5": "0d21a6449f6de7e9b738e6cda9141b38",
+      "url": "https://archive.org/download/iiab-7.2-201028-full_desktop_big_iiab-g3357c56.img.zip/iiab-7.2-201028-full_desktop_big_iiab-g3357c56.img.zip",
+      "icon": "https://raw.githubusercontent.com/iiab/iiab-factory/master/box/rpi/rpi-imager/iiab40.png"
+    },
+    {
       "name": "Full RPI Desktop w/ Medium IIAB",
       "description": "IIAB version 7.2 (Nov 2020) installed on Raspbian OS Full Desktop Verion 8/20/2020",
       "extract_size": 15315148800,

@@ -40,7 +40,8 @@ archive_item = {} # metadata from archive.org version.
 http = urllib3.PoolManager(cert_reqs='CERT_REQUIRED',\
            ca_certs=certifi.where())
 #resp = (http.request("GET",src_url,retries=10))
-
+name = ''
+description = ''
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Upload img to archive.org, Set rpi-imager json files.")
@@ -333,6 +334,7 @@ def do_archive():
    #print(str(imager_md))
    if args.check:
       print('\nSibling file contents:\n%s'%json.dumps(imager_md,indent=2))
+   pdb.set_trace()
    if recorded_md5 == '' or not imager_md:
       imager_md = create_imager_metadata()
       recorded_md5 = file_contents('./%s.%s'%(args.image_name,'zip.md5'))
