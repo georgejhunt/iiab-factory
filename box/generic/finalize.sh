@@ -1,4 +1,4 @@
-#!/bin/bash 
+#!/bin/bash -x
 # remove all the proprietary and non generic data
 
 
@@ -15,6 +15,7 @@ if [ -f /etc/lightdm/lightdm.conf -a "$PLATFORM" = "raspbian" ]; then
   history -cw
 fi
 
+
 # remove any aliases we might have added
 rm -f /root/.bash_aliases
 rm -f /home/iiab-admin/.bash_aliases
@@ -27,15 +28,13 @@ systemctl disable openvpn
 rm -rf /root/tools
 rm -f /root/.netrc
 rm -f /root/id_rsa
-rm -f /etc/ssh/ssh_host*
-
 if [ "$PLATFORM" == 'raspbian' ]; then
-   cp -f ../rpi/pibashrc /root/.bashrc
+   rm -f /etc/ssh/ssh_host*
+   cp -f ./pibashrc /root/.bashrc
    
-  # if hostkeys are missing, recreate them and restart sshd
-  found=$(grep "ssh-keygen" /etc/rc.local)
-  if [ -z "found" ];then
-      sed -i '/^exit.*/i "ssh-keygen -A\nsystemctl restart sshd"`' /etc/rc.local
-  fi
+   # if hostkeys are missing, recreate them and restart sshd
+   if ! grep ssh-keygen /etc/rc.local;then
+      sed '/^exit.*/i ssh-keygen -A\nsystemctl restart sshd' /etc/rc.local
+   fi
 fi
 
