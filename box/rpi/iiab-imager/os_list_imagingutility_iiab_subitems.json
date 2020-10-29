@@ -1,7 +1,18 @@
 {
   "os_list": [
     {
-      "name": "Desktop w/ Medium IIAB 7.2",
+      "name": "Rpi OS Lite - minimum IIAB",
+      "description": "Pre 7.2 min services (see http://wiki.laptop.org/go/IIAB/FAQ#What_services_.28IIAB_apps.29_are_suggested_during_installation.3F)",
+      "extract_size": 7151284224,
+      "extract_sha256": "061eb79e0003aff9d197f45efc69a2a25dedaf9e63528be3cc5e1bc0e1b358d2",
+      "image_download_size": 3220771067,
+      "release_date": "10/29/2020",
+      "zip.md5": "fd7d7ccfa00f1e60389a43d161f39f5b",
+      "url": "https://archive.org/download/iiab-7.2-201029-rpi_os_lite_iiab_lite-gdb1026a.img.zip/iiab-7.2-201029-rpi_os_lite_iiab_lite-gdb1026a.img.zip",
+      "icon": "https://raw.githubusercontent.com/iiab/iiab-factory/master/box/rpi/rpi-imager/iiab40.png"
+    },
+    {
+      "name": "Desktop w/ Medium IIAB Pre 7.2",
       "description": "Raspberry Pi Desktop (no extras) with Medium Selection of IIAB Services",
       "extract_size": 10963066880,
       "extract_sha256": "b67673671f3804e0dc2dc1ffcab19acbc4f645214cf5cb8aa4d80bcb33aed83b",
@@ -13,24 +24,13 @@
     },
     {
       "name": "Full Desktop Big IIAB",
-      "description": "IIAB 7.2 (Oct 2020) loaded onto Rasberry Pi OS Full Desktop -- Everything Maximum",
+      "description": "IIAB Pre 7.2 (Oct 2020) loaded onto Rasberry Pi OS Full Desktop -- Everything Maximum",
       "extract_size": 17348542464,
       "extract_sha256": "c5e04092fbb2a7df168fd221aca4b6dfba320c1686019dfe9fe961e51d989532",
       "image_download_size": 7385116002,
       "release_date": "10/28/2020",
       "zip.md5": "0d21a6449f6de7e9b738e6cda9141b38",
       "url": "https://archive.org/download/iiab-7.2-201028-full_desktop_big_iiab-g3357c56.img.zip/iiab-7.2-201028-full_desktop_big_iiab-g3357c56.img.zip",
-      "icon": "https://raw.githubusercontent.com/iiab/iiab-factory/master/box/rpi/rpi-imager/iiab40.png"
-    },
-    {
-      "name": "Full RPI Desktop w/ Medium IIAB",
-      "description": "IIAB version 7.2 (Nov 2020) installed on Raspbian OS Full Desktop Verion 8/20/2020",
-      "extract_size": 15315148800,
-      "extract_sha256": "451777985f760b78ace30d37b7b8d557fc934d61735cb93a3d54f4beab875bef",
-      "image_download_size": 6983778066,
-      "release_date": "10/26/2020",
-      "zip.md5": "a1b72e918087f85996bf5b5ff9bb3a4a",
-      "url": "https://archive.org/download/iiab-7.2-201026-Full-Desktop-Medium-IIAB-g3357c56.img.zip/iiab-7.2-201026-Full-Desktop-Medium-IIAB-g3357c56.img.zip",
       "icon": "https://raw.githubusercontent.com/iiab/iiab-factory/master/box/rpi/rpi-imager/iiab40.png"
     },
     {
