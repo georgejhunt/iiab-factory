@@ -32,7 +32,7 @@ if [ "$PLATFORM" == 'raspbian' ]; then
    rm -f /etc/ssh/ssh_host*
    # if hostkeys are missing, recreate them and restart sshd
    if ! grep ssh-keygen /etc/rc.local;then
-      sed '/^exit.*/i ssh-keygen -A\nsystemctl restart sshd' /etc/rc.local
+      sed -i -e '/^exit.*/i ssh-keygen -A\nsystemctl restart sshd' /etc/rc.local
    fi
 fi
 
