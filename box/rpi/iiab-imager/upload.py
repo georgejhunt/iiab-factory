@@ -167,9 +167,15 @@ def create_imager_metadata():
       do_zip()
    global imager_md
    global local_md
+   global name
+   global decription
    calculate_local_md()
-   local_md['name'] = get_title_description('name')
-   local_md['description'] = get_title_description('description`')
+   name = file_contents('./%s/%s'%(args.image_name,'name'))
+   if name == '':
+      local_md['name'] = get_title_description('name')
+   description = file_contents('./%s/%s'%(args.image_name,'description'))
+   if description == '':
+      local_md['description'] = get_title_description('description`')
    write_imager_md(local_md)
    imager_md = local_md.copy()
 
@@ -336,7 +342,7 @@ def do_archive():
       print('\nSibling file contents:\n%s'%json.dumps(imager_md,indent=2))
    pdb.set_trace()
    if recorded_md5 == '' or not imager_md:
-      imager_md = create_imager_metadata()
+      create_imager_metadata()
       recorded_md5 = file_contents('./%s.%s'%(args.image_name,'zip.md5'))
 
    # Fetch metadata, if it exists, from archive.org

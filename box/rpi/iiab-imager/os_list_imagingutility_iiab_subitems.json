@@ -1,6 +1,17 @@
 {
   "os_list": [
     {
+      "name": "Desktop w/ Medium IIAB 7.2",
+      "description": "Raspberry Pi Desktop (no extras) with Medium Selection of IIAB Services",
+      "extract_size": 10963066880,
+      "extract_sha256": "b67673671f3804e0dc2dc1ffcab19acbc4f645214cf5cb8aa4d80bcb33aed83b",
+      "image_download_size": 5249536594,
+      "release_date": "10/28/2020",
+      "zip.md5": "3f2e206f1c65f4055b3e9dc52f090ac2",
+      "url": "https://archive.org/download/iiab-7.2-201028-desktop_medium_iiab-gf6b63e8.img.zip/iiab-7.2-201028-desktop_medium_iiab-gf6b63e8.img.zip",
+      "icon": "https://raw.githubusercontent.com/iiab/iiab-factory/master/box/rpi/rpi-imager/iiab40.png"
+    },
+    {
       "name": "Full Desktop Big IIAB",
       "description": "IIAB 7.2 (Oct 2020) loaded onto Rasberry Pi OS Full Desktop -- Everything Maximum",
       "extract_size": 17348542464,
