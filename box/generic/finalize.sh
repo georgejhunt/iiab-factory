@@ -30,8 +30,6 @@ rm -f /root/.netrc
 rm -f /root/id_rsa
 if [ "$PLATFORM" == 'raspbian' ]; then
    rm -f /etc/ssh/ssh_host*
-   cp -f ./pibashrc /root/.bashrc
-   
    # if hostkeys are missing, recreate them and restart sshd
    if ! grep ssh-keygen /etc/rc.local;then
       sed '/^exit.*/i ssh-keygen -A\nsystemctl restart sshd' /etc/rc.local

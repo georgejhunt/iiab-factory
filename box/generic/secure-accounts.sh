@@ -16,7 +16,7 @@ chown -R root:root $ADMIN_SSH
 if [ "$PLATFORM" = "raspbian" ]; then
   # this is a headless install -- so disable pi password login
   #sed -i -e 's/^pi\:.*/pi\:\*\:17228\:0\:99999\:\:\:\:/' /etc/shadow
-  cp -f ../rpi/pibashrc /root/.bashrc
+  cp -f ./pibashrc /root/.bashrc
   echo -e "g0adm1n\ng0adm1n" | passwd iiab-admin
   echo -e "raspberry\nraspberry"| passwd pi
 fi
