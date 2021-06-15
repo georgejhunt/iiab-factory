@@ -48,7 +48,7 @@ if [ -d $2/tree/A ];then
 fi
 
 cd $2/tree
-for f in $(find .|grep -e html -e css); do
+for f in $(find .|grep -e html -e css ); do
    sed -i -e's|../../../I/||g' $f
    sed -i -e's|../../I/||g' $f
    sed -i -e's|../I/||g' $f
